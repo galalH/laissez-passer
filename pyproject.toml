@@ -1,0 +1,13 @@
+[project]
+name = "laissez-passer"
+version = "0.1.0"
+requires-python = ">=3.14"
+dependencies = [
+    "beautifulsoup4",
+    "country-converter",
+    "flask",
+    "pandas",
+    "playwright",
+    "python-dateutil",
+    "requests",
+]

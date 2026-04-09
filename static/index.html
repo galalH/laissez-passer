@@ -1,0 +1,552 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Laissez-Passer</title>
+<link rel="icon" type="image/png" href="favicon.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;700&display=swap" rel="stylesheet">
+<style>
+*, *::before, *::after { box-sizing: border-box; }
+html, body { height: 100%; margin: 0; padding: 0; }
+body {
+  font-family: 'Roboto', sans-serif;
+  font-size: 14px;
+  background: #fff;
+  color: #000;
+}
+
+#app {
+  max-width: 800px;
+  margin: 0 auto;
+  padding: 0 2rem;
+}
+
+/* Header */
+#header {
+  padding: 2rem 0 1.5rem;
+}
+#site-name {
+  font-size: 22px;
+  font-weight: 700;
+  color: #000;
+  letter-spacing: -0.5px;
+  margin: 0;
+}
+#tagline {
+  font-size: 14px;
+  font-weight: 400;
+  color: #aaa;
+  margin: 2px 0 0;
+}
+
+/* Toolbar */
+#toolbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 6px;
+}
+#search {
+  width: 260px;
+  font-family: 'Roboto', sans-serif;
+  font-size: 14px;
+  border: 1px solid #ccc;
+  padding: 4px 8px;
+  outline: none;
+  border-radius: 0;
+}
+#search:focus { border-color: #888; }
+#sort-controls {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+}
+#sort-label { color: #aaa; }
+.sort-opt {
+  color: #aaa;
+  cursor: pointer;
+  user-select: none;
+}
+.sort-opt.active { color: #000; font-weight: 700; }
+.sort-sep { color: #bbb; }
+#listing-count {
+  margin-left: auto;
+  font-size: 12px;
+  color: #aaa;
+  white-space: nowrap;
+}
+
+/* List */
+#list {
+  margin: 0;
+  padding: 0;
+}
+.row {
+  display: flex;
+  align-items: center;
+  padding: 8px 0;
+  border-bottom: 1px solid #e8e8e8;
+  cursor: pointer;
+  overflow: hidden;
+  text-decoration: none;
+  color: inherit;
+}
+.row:hover .job-title { text-decoration: underline; }
+
+.badge {
+  flex-shrink: 0;
+  min-width: 72px;
+  text-align: right;
+  background: #009edb;
+  color: #fff;
+  font-weight: 700;
+  font-size: 12px;
+  padding: 2px 7px;
+  margin-right: 9px;
+  white-space: nowrap;
+}
+.badge.empty {
+  background: #e0e0e0;
+  color: #999;
+}
+
+.job-title {
+  font-weight: 700;
+  color: #009edb;
+  flex: 0 1 auto;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.sep {
+  color: #bbb;
+  margin: 0 6px;
+  flex-shrink: 0;
+}
+
+.agency {
+  font-weight: 700;
+  color: #000;
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
+.meta {
+  color: #555;
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
+/* Status message */
+#status {
+  color: #aaa;
+  padding: 16px 0;
+}
+
+/* Footer (updated-at + pagination) */
+#footer {
+  display: flex;
+  align-items: center;
+  padding: 10px 0 2rem;
+}
+#updated-at {
+  font-size: 12px;
+  color: #aaa;
+  cursor: pointer;
+  user-select: none;
+  white-space: nowrap;
+}
+#updated-at:hover { color: #555; }
+#updated-at.refreshing { cursor: default; color: #bbb; }
+#pagination {
+  margin-left: auto;
+  text-align: right;
+  font-size: 12px;
+  user-select: none;
+}
+.page-item {
+  display: inline;
+  cursor: pointer;
+  color: #aaa;
+  margin: 0 2px;
+}
+.page-item.active { color: #000; font-weight: 700; cursor: default; }
+.page-item.ellipsis { cursor: default; }
+.page-sep { color: #bbb; margin: 0 2px; }
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="header">
+    <div id="site-name">Laissez-Passer</div>
+    <div id="tagline">Your pass to what's next.</div>
+  </div>
+
+  <div id="toolbar">
+    <input id="search" type="text" placeholder="Search grade, title, agency, location…">
+    <div id="sort-controls">
+      <span id="sort-label">sort by</span>
+      <span class="sort-sep">·</span>
+      <span class="sort-opt active" data-sort="deadline">deadline</span>
+      <span class="sort-sep">·</span>
+      <span class="sort-opt" data-sort="agency">agency</span>
+      <span class="sort-sep">·</span>
+      <span class="sort-opt" data-sort="grade">grade</span>
+    </div>
+    <span id="listing-count"></span>
+  </div>
+
+  <div id="list"><div id="status">loading…</div></div>
+  <div id="footer">
+    <span id="updated-at"></span>
+    <div id="pagination"></div>
+  </div>
+</div>
+
+<script>
+const GRADE_ORDER = [
+  'P-1','P-2','P-3','P-4','P-5',
+  'D-1','D-2',
+  'G-2','G-3','G-4','G-5','G-6','G-7',
+  'NO-A','NO-B','NO-C','NO-D',
+  'CON','CST','INT','UG','VOL',
+  'NPSA-3','NPSA-4','NPSA-5','NPSA-6','NPSA-7','NPSA-8','NPSA-9','NPSA-10','NPSA-11',
+  'IPSA-9','IPSA-10','IPSA-11',
+  'IICA-1','IICA-2','IICA-3','IICA-4',
+  'LICA-2','LICA-3','LICA-4','LICA-5','LICA-6','LICA-7','LICA-8','LICA-9','LICA-10',
+  'SC L2','SC L4','SC L5','SC L6','SC L8','SC L9','SC L10',
+  'SSA L4','SSA L5','SSA L8','SSA L9',
+  'GF','GG','GH','GE','GD','GC','GB',
+  'A06','A08','A09','A10','A11','A12','A14',
+  'B03','B05',
+  'ADG','PSA','NPP','NB1'
+];
+const GRADE_MAP = Object.fromEntries(GRADE_ORDER.map((g, i) => [g, i]));
+
+let allJobs = [];
+let filtered = [];
+let currentSort = 'deadline';
+let currentPage = 1;
+let PAGE_SIZE = 20;
+let resizeTimer = null;
+let updatedAt = null;
+
+function parseGrade(raw) {
+  if (!raw) return null;
+  const parts = raw.split(',').map(s => s.trim()).filter(Boolean);
+  return parts[parts.length - 1] || null;
+}
+
+function formatDate(d) {
+  if (!d) return '—';
+  const parts = d.split('-');
+  if (parts.length < 3) return '—';
+  const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  const m = parseInt(parts[1], 10) - 1;
+  const day = parseInt(parts[2], 10);
+  return months[m] + ' ' + day;
+}
+
+function formatUpdatedAt(iso) {
+  if (!iso) return '';
+  const d = new Date(iso);
+  const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  const hh = String(d.getHours()).padStart(2, '0');
+  const mm = String(d.getMinutes()).padStart(2, '0');
+  return months[d.getMonth()] + ' ' + d.getDate() + ', ' + d.getFullYear() + ' ' + hh + ':' + mm;
+}
+
+function renderUpdatedAt() {
+  const el = document.getElementById('updated-at');
+  if (!updatedAt) { el.textContent = ''; return; }
+  el.textContent = '↻ Updated ' + formatUpdatedAt(updatedAt);
+}
+
+function jobLocation(job) {
+  if (job.city && job.country) return job.city + ', ' + job.country;
+  if (job.country) return job.country;
+  if (job.city) return job.city;
+  return '';
+}
+
+function sortJobs(jobs) {
+  const arr = jobs.slice();
+  if (currentSort === 'deadline') {
+    arr.sort((a, b) => {
+      if (!a.deadline && !b.deadline) return 0;
+      if (!a.deadline) return 1;
+      if (!b.deadline) return -1;
+      return a.deadline < b.deadline ? -1 : a.deadline > b.deadline ? 1 : 0;
+    });
+  } else if (currentSort === 'agency') {
+    arr.sort((a, b) => {
+      const ag = (a.agency || '').toLowerCase();
+      const bg = (b.agency || '').toLowerCase();
+      return ag < bg ? -1 : ag > bg ? 1 : 0;
+    });
+  } else if (currentSort === 'grade') {
+    arr.sort((a, b) => {
+      const ag = parseGrade(a.grade);
+      const bg = parseGrade(b.grade);
+      const ai = ag !== null && GRADE_MAP[ag] !== undefined ? GRADE_MAP[ag] : Infinity;
+      const bi = bg !== null && GRADE_MAP[bg] !== undefined ? GRADE_MAP[bg] : Infinity;
+      return ai - bi;
+    });
+  }
+  return arr;
+}
+
+function applySearch(query) {
+  if (!query) return allJobs.slice();
+  const q = query.toLowerCase();
+  return allJobs.filter(job => {
+    return (
+      (job.grade || '').toLowerCase().includes(q) ||
+      (job.job_title || '').toLowerCase().includes(q) ||
+      (job.agency || '').toLowerCase().includes(q) ||
+      (job.city || '').toLowerCase().includes(q) ||
+      (job.country || '').toLowerCase().includes(q) ||
+      (job.deadline || '').toLowerCase().includes(q)
+    );
+  });
+}
+
+function calculatePageSize() {
+  const header = document.getElementById('header');
+  const toolbar = document.getElementById('toolbar');
+  const footer = document.getElementById('footer');
+  const headerH = header ? header.offsetHeight : 80;
+  const toolbarH = toolbar ? toolbar.offsetHeight : 36;
+  const paginationH = footer ? footer.offsetHeight : 32;
+  const existingRow = document.querySelector('.row');
+  const rowH = existingRow ? existingRow.offsetHeight : 37;
+  const available = window.innerHeight - headerH - toolbarH - paginationH - 16;
+  PAGE_SIZE = Math.max(5, Math.floor(available / rowH));
+}
+
+function renderList() {
+  const listEl = document.getElementById('list');
+  const sorted = sortJobs(filtered);
+  const total = sorted.length;
+  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+  if (currentPage > totalPages) currentPage = totalPages;
+
+  document.getElementById('listing-count').textContent =
+    total === 1 ? '1 listing' : total.toLocaleString() + ' listings';
+
+  if (total === 0) {
+    listEl.innerHTML = '<div id="status">no listings found.</div>';
+    document.getElementById('pagination').innerHTML = '';
+    return;
+  }
+
+  const start = (currentPage - 1) * PAGE_SIZE;
+  const page = sorted.slice(start, start + PAGE_SIZE);
+
+  const rows = page.map(job => {
+    const grade = parseGrade(job.grade);
+    const badgeClass = grade ? 'badge' : 'badge empty';
+    const badgeText = grade || '—';
+    const loc = jobLocation(job);
+    const date = formatDate(job.deadline);
+    const meta = [loc, date].filter(Boolean).join(' · ');
+
+    return `<a class="row" href="${escHtml(job.url || '#')}" target="_blank" rel="noopener noreferrer">` +
+      `<span class="${badgeClass}">${escHtml(badgeText)}</span>` +
+      `<span class="job-title">${escHtml(job.job_title || '')}</span>` +
+      `<span class="sep">·</span>` +
+      `<span class="agency">${escHtml(job.agency || '')}</span>` +
+      (meta ? `<span class="sep">·</span><span class="meta">${escHtml(meta)}</span>` : '') +
+      `</a>`;
+  });
+
+  listEl.innerHTML = rows.join('');
+  renderPagination(totalPages);
+}
+
+function escHtml(str) {
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+function renderPagination(totalPages) {
+  const el = document.getElementById('pagination');
+  if (totalPages <= 1) { el.innerHTML = ''; return; }
+
+  const items = [];
+
+  if (currentPage > 1) {
+    items.push(`<span class="page-item" data-page="${currentPage - 1}">← prev</span>`);
+    items.push(`<span class="page-sep">·</span>`);
+  }
+
+  const pages = buildPageRange(currentPage, totalPages);
+  pages.forEach((p, i) => {
+    if (p === '…') {
+      if (i > 0) items.push(`<span class="page-sep">·</span>`);
+      items.push(`<span class="page-item ellipsis">…</span>`);
+    } else {
+      if (i > 0) items.push(`<span class="page-sep">·</span>`);
+      const cls = p === currentPage ? 'page-item active' : 'page-item';
+      items.push(`<span class="${cls}" data-page="${p}">${p}</span>`);
+    }
+  });
+
+  if (currentPage < totalPages) {
+    items.push(`<span class="page-sep">·</span>`);
+    items.push(`<span class="page-item" data-page="${currentPage + 1}">next →</span>`);
+  }
+
+  el.innerHTML = items.join('');
+}
+
+function buildPageRange(current, total) {
+  if (total <= 7) return Array.from({length: total}, (_, i) => i + 1);
+  const pages = new Set([1, total, current - 1, current, current + 1].filter(p => p >= 1 && p <= total));
+  const sorted = Array.from(pages).sort((a, b) => a - b);
+  const result = [];
+  let prev = 0;
+  for (const p of sorted) {
+    if (p - prev > 1) result.push('…');
+    result.push(p);
+    prev = p;
+  }
+  return result;
+}
+
+function init() {
+  // Search
+  document.getElementById('search').addEventListener('input', function() {
+    filtered = applySearch(this.value.trim());
+    currentPage = 1;
+    renderList();
+  });
+
+  // Sort
+  document.querySelectorAll('.sort-opt').forEach(el => {
+    el.addEventListener('click', function() {
+      currentSort = this.dataset.sort;
+      document.querySelectorAll('.sort-opt').forEach(s => s.classList.remove('active'));
+      this.classList.add('active');
+      currentPage = 1;
+      renderList();
+    });
+  });
+
+  // Pagination
+  document.getElementById('pagination').addEventListener('click', function(e) {
+    const item = e.target.closest('.page-item');
+    if (!item || item.classList.contains('active') || item.classList.contains('ellipsis')) return;
+    const p = parseInt(item.dataset.page, 10);
+    if (!isNaN(p)) {
+      currentPage = p;
+      renderList();
+      window.scrollTo(0, 0);
+    }
+  });
+
+  // Resize
+  window.addEventListener('resize', function() {
+    clearTimeout(resizeTimer);
+    resizeTimer = setTimeout(function() {
+      calculatePageSize();
+      currentPage = 1;
+      renderList();
+    }, 150);
+  });
+
+  fetch('/data.json')
+    .then(r => {
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      return r.json();
+    })
+    .then(data => {
+      allJobs = Array.isArray(data) ? data : (data.jobs || []);
+      updatedAt = data.updated || null;
+      filtered = allJobs.slice();
+      renderUpdatedAt();
+      // Render a probe batch so row heights are measurable, then recalculate
+      PAGE_SIZE = 50;
+      renderList();
+      requestAnimationFrame(function() {
+        calculatePageSize();
+        renderList();
+      });
+    })
+    .catch(() => {
+      document.getElementById('list').innerHTML = '<div id="status">could not load listings.</div>';
+    });
+
+  // Refresh
+  document.getElementById('updated-at').addEventListener('click', function() {
+    const el = this;
+    if (el.classList.contains('refreshing')) return;
+    el.classList.add('refreshing');
+    el.textContent = 'connecting…';
+
+    fetch('/refresh', { method: 'POST' })
+      .then(r => {
+        const reader = r.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+
+        function processLine(line) {
+          if (!line.startsWith('data:')) return;
+          const msg = line.slice(5);
+          if (msg.startsWith('progress:')) {
+            const parts = msg.slice(9).split(':');
+            const fraction = parts[0];
+            const agency = parts[1] || '';
+            el.textContent = agency + '… ' + fraction;
+          } else if (msg.startsWith('done:')) {
+            el.textContent = msg.slice(5);
+          } else if (msg.startsWith('warning:')) {
+            console.warn('[refresh]', msg.slice(8));
+          }
+        }
+
+        function read() {
+          reader.read().then(({ done, value }) => {
+            if (done) {
+              fetch('/data.json')
+                .then(r => r.json())
+                .then(data => {
+                  allJobs = Array.isArray(data) ? data : (data.jobs || []);
+                  updatedAt = data.updated || null;
+                  filtered = applySearch(document.getElementById('search').value.trim());
+                  currentPage = 1;
+                  renderUpdatedAt();
+                  el.classList.remove('refreshing');
+                  renderList();
+                });
+              return;
+            }
+            buffer += decoder.decode(value, { stream: true });
+            const lines = buffer.split('\n');
+            buffer = lines.pop();
+            lines.forEach(processLine);
+            read();
+          });
+        }
+        read();
+      })
+      .catch(() => {
+        el.classList.remove('refreshing');
+        renderUpdatedAt();
+      });
+  });
+}
+
+document.addEventListener('DOMContentLoaded', init);
+</script>
+</body>
+</html>
