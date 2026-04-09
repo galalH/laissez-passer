@@ -482,9 +482,14 @@ function init() {
       });
     })
     .catch(err => {
-      const msg = err.noData ? 'no listings yet.' : 'could not load listings.';
-      document.getElementById('list').innerHTML = `<div id="status">${msg}</div>`;
-      renderUpdatedAt();
+      if (err.noData) {
+        document.getElementById('list').innerHTML = '<div id="status">no listings yet.</div>';
+        renderUpdatedAt();
+        document.getElementById('updated-at').click();
+      } else {
+        document.getElementById('list').innerHTML = '<div id="status">could not load listings.</div>';
+        renderUpdatedAt();
+      }
     });
 
   // Refresh
