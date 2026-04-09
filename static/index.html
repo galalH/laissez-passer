@@ -193,11 +193,9 @@ body {
     <div id="sort-controls">
       <span id="sort-label">sort by</span>
       <span class="sort-sep">·</span>
-      <span class="sort-opt active" data-sort="deadline">deadline</span>
+      <span class="sort-opt active" data-sort="new">new</span>
       <span class="sort-sep">·</span>
-      <span class="sort-opt" data-sort="agency">agency</span>
-      <span class="sort-sep">·</span>
-      <span class="sort-opt" data-sort="grade">grade</span>
+      <span class="sort-opt" data-sort="deadline">deadline</span>
     </div>
     <span id="listing-count"></span>
   </div>
@@ -210,28 +208,9 @@ body {
 </div>
 
 <script>
-const GRADE_ORDER = [
-  'P-1','P-2','P-3','P-4','P-5',
-  'D-1','D-2',
-  'G-2','G-3','G-4','G-5','G-6','G-7',
-  'NO-A','NO-B','NO-C','NO-D',
-  'CON','CST','INT','UG','VOL',
-  'NPSA-3','NPSA-4','NPSA-5','NPSA-6','NPSA-7','NPSA-8','NPSA-9','NPSA-10','NPSA-11',
-  'IPSA-9','IPSA-10','IPSA-11',
-  'IICA-1','IICA-2','IICA-3','IICA-4',
-  'LICA-2','LICA-3','LICA-4','LICA-5','LICA-6','LICA-7','LICA-8','LICA-9','LICA-10',
-  'SC L2','SC L4','SC L5','SC L6','SC L8','SC L9','SC L10',
-  'SSA L4','SSA L5','SSA L8','SSA L9',
-  'GF','GG','GH','GE','GD','GC','GB',
-  'A06','A08','A09','A10','A11','A12','A14',
-  'B03','B05',
-  'ADG','PSA','NPP','NB1'
-];
-const GRADE_MAP = Object.fromEntries(GRADE_ORDER.map((g, i) => [g, i]));
-
 let allJobs = [];
 let filtered = [];
-let currentSort = 'deadline';
+let currentSort = 'new';
 let currentPage = 1;
 let PAGE_SIZE = 20;
 let resizeTimer = null;
@@ -276,26 +255,19 @@ function jobLocation(job) {
 
 function sortJobs(jobs) {
   const arr = jobs.slice();
-  if (currentSort === 'deadline') {
+  if (currentSort === 'new') {
+    arr.sort((a, b) => {
+      if (!a.pubdate && !b.pubdate) return 0;
+      if (!a.pubdate) return 1;
+      if (!b.pubdate) return -1;
+      return a.pubdate > b.pubdate ? -1 : a.pubdate < b.pubdate ? 1 : 0;
+    });
+  } else if (currentSort === 'deadline') {
     arr.sort((a, b) => {
       if (!a.deadline && !b.deadline) return 0;
       if (!a.deadline) return 1;
       if (!b.deadline) return -1;
       return a.deadline < b.deadline ? -1 : a.deadline > b.deadline ? 1 : 0;
-    });
-  } else if (currentSort === 'agency') {
-    arr.sort((a, b) => {
-      const ag = (a.agency || '').toLowerCase();
-      const bg = (b.agency || '').toLowerCase();
-      return ag < bg ? -1 : ag > bg ? 1 : 0;
-    });
-  } else if (currentSort === 'grade') {
-    arr.sort((a, b) => {
-      const ag = parseGrade(a.grade);
-      const bg = parseGrade(b.grade);
-      const ai = ag !== null && GRADE_MAP[ag] !== undefined ? GRADE_MAP[ag] : Infinity;
-      const bi = bg !== null && GRADE_MAP[bg] !== undefined ? GRADE_MAP[bg] : Infinity;
-      return ai - bi;
     });
   }
   return arr;
