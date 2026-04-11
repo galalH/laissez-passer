@@ -8,6 +8,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;700&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
 <style>
 *, *::before, *::after { box-sizing: border-box; }
 html, body { height: 100%; margin: 0; padding: 0; }
@@ -24,7 +25,7 @@ body {
   padding: 0 2rem;
 }
 
-/* Header */
+/* ── Header ── */
 #header {
   padding: 2rem 0 1.5rem;
 }
@@ -42,7 +43,7 @@ body {
   margin: 2px 0 0;
 }
 
-/* Toolbar */
+/* ── Toolbar ── */
 #toolbar {
   display: flex;
   align-items: center;
@@ -80,7 +81,7 @@ body {
   white-space: nowrap;
 }
 
-/* List */
+/* ── List ── */
 #list {
   margin: 0;
   padding: 0;
@@ -92,8 +93,6 @@ body {
   border-bottom: 1px solid #e8e8e8;
   cursor: pointer;
   overflow: hidden;
-  text-decoration: none;
-  color: inherit;
 }
 .row:hover .job-title { text-decoration: underline; }
 
@@ -143,13 +142,13 @@ body {
   white-space: nowrap;
 }
 
-/* Status message */
+/* ── Status message ── */
 #status {
   color: #aaa;
   padding: 16px 0;
 }
 
-/* Footer (updated-at + pagination) */
+/* ── Footer ── */
 #footer {
   display: flex;
   align-items: center;
@@ -179,35 +178,183 @@ body {
 .page-item.active { color: #000; font-weight: 700; cursor: default; }
 .page-item.ellipsis { cursor: default; }
 .page-sep { color: #bbb; margin: 0 2px; }
+
+/* ── Detail view ── */
+#view-detail { display: none; }
+
+#detail-nav {
+  padding: 2rem 0 1.5rem;
+}
+#detail-back {
+  font-size: 22px;
+  font-weight: 700;
+  color: #aaa;
+  text-decoration: none;
+  letter-spacing: -0.5px;
+}
+#detail-back:hover { color: #000; }
+
+#detail-title {
+  font-size: 20px;
+  font-weight: 700;
+  color: #000;
+  line-height: 1.3;
+  margin: 0 0 12px;
+}
+
+#detail-meta {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  margin-bottom: 16px;
+}
+
+#detail-link {
+  display: inline-block;
+  font-size: 13px;
+  color: #009edb;
+  text-decoration: none;
+  margin-bottom: 2rem;
+  border-bottom: 1px solid #e8e8e8;
+  padding-bottom: 1.5rem;
+  width: 100%;
+}
+#detail-link:hover { text-decoration: underline; }
+
+/* ── Markdown description ── */
+.description {
+  font-size: 14px;
+  color: #000;
+  line-height: 1.65;
+  padding-bottom: 3rem;
+}
+.description p {
+  margin: 0 0 1em;
+}
+.description h1,
+.description h2,
+.description h3,
+.description h4,
+.description h5,
+.description h6 {
+  font-family: 'Roboto', sans-serif;
+  font-weight: 700;
+  color: #000;
+  margin: 1.5em 0 0.4em;
+  line-height: 1.25;
+}
+.description h1 { font-size: 18px; }
+.description h2 { font-size: 16px; }
+.description h3 { font-size: 15px; }
+.description h4,
+.description h5,
+.description h6 { font-size: 14px; text-transform: uppercase; letter-spacing: 0.03em; color: #555; }
+.description a {
+  color: #009edb;
+  text-decoration: none;
+}
+.description a:hover { text-decoration: underline; }
+.description ul,
+.description ol {
+  margin: 0 0 1em;
+  padding-left: 1.6em;
+}
+.description li { margin-bottom: 0.3em; }
+.description li > ul,
+.description li > ol { margin-top: 0.2em; margin-bottom: 0; }
+.description strong { font-weight: 700; }
+.description em { font-style: italic; }
+.description hr {
+  border: none;
+  border-top: 1px solid #e8e8e8;
+  margin: 1.5em 0;
+}
+.description blockquote {
+  margin: 0 0 1em;
+  padding: 0.1em 0 0.1em 1em;
+  border-left: 3px solid #e0e0e0;
+  color: #555;
+}
+.description code {
+  font-family: monospace;
+  font-size: 12.5px;
+  background: #f5f5f5;
+  padding: 1px 4px;
+}
+.description pre {
+  background: #f5f5f5;
+  padding: 12px;
+  overflow-x: auto;
+  margin: 0 0 1em;
+}
+.description pre code {
+  background: none;
+  padding: 0;
+}
+.description table {
+  border-collapse: collapse;
+  width: 100%;
+  margin: 0 0 1em;
+  font-size: 13px;
+}
+.description th,
+.description td {
+  border: 1px solid #e8e8e8;
+  padding: 6px 10px;
+  text-align: left;
+}
+.description th {
+  font-weight: 700;
+  background: #f5f5f5;
+}
+.description td { color: #333; }
 </style>
 </head>
 <body>
 <div id="app">
-  <div id="header">
-    <div id="site-name">Laissez-Passer</div>
-    <div id="tagline">Your pass to what's next.</div>
-  </div>
 
-  <div id="toolbar">
-    <input id="search" type="text" placeholder="Search grade, title, agency, location…">
-    <div id="sort-controls">
-      <span id="sort-label">sort by</span>
-      <span class="sort-sep">·</span>
-      <span class="sort-opt active" data-sort="new">new</span>
-      <span class="sort-sep">·</span>
-      <span class="sort-opt" data-sort="deadline">deadline</span>
+  <!-- ── List view ── -->
+  <div id="view-list">
+    <div id="header">
+      <div id="site-name">Laissez-Passer</div>
+      <div id="tagline">Your pass to what's next.</div>
     </div>
-    <span id="listing-count"></span>
+
+    <div id="toolbar">
+      <input id="search" type="text" placeholder="Search grade, title, agency, location…">
+      <div id="sort-controls">
+        <span id="sort-label">sort by</span>
+        <span class="sort-sep">·</span>
+        <span class="sort-opt active" data-sort="new">new</span>
+        <span class="sort-sep">·</span>
+        <span class="sort-opt" data-sort="deadline">deadline</span>
+      </div>
+      <span id="listing-count"></span>
+    </div>
+
+    <div id="list"><div id="status">loading…</div></div>
+    <div id="footer">
+      <span id="updated-at"></span>
+      <div id="pagination"></div>
+    </div>
   </div>
 
-  <div id="list"><div id="status">loading…</div></div>
-  <div id="footer">
-    <span id="updated-at"></span>
-    <div id="pagination"></div>
+  <!-- ── Detail view ── -->
+  <div id="view-detail">
+    <div id="detail-nav">
+      <a id="detail-back" href="">← Laissez-Passer</a>
+    </div>
+    <div id="detail-title"></div>
+    <div id="detail-meta"></div>
+    <a id="detail-link" target="_blank" rel="noopener noreferrer">View original posting →</a>
+    <div id="detail-description" class="description"></div>
   </div>
+
 </div>
 
 <script>
+marked.use({ gfm: true, breaks: false });
+
 let allJobs = [];
 let filtered = [];
 let currentSort = 'new';
@@ -320,24 +467,32 @@ function renderList() {
   const start = (currentPage - 1) * PAGE_SIZE;
   const page = sorted.slice(start, start + PAGE_SIZE);
 
-  const rows = page.map(job => {
+  const rows = page.map((job, i) => {
     const grade = parseGrade(job.grade);
     const badgeClass = grade ? 'badge' : 'badge empty';
     const badgeText = grade || '—';
     const loc = jobLocation(job);
     const date = formatDate(job.deadline);
     const meta = [loc, date].filter(Boolean).join(' · ');
+    const idx = start + i;
 
-    return `<a class="row" href="${escHtml(job.url || '#')}" target="_blank" rel="noopener noreferrer">` +
+    return `<div class="row" data-idx="${idx}">` +
       `<span class="${badgeClass}">${escHtml(badgeText)}</span>` +
       `<span class="job-title">${escHtml(job.job_title || '')}</span>` +
       `<span class="sep">·</span>` +
       `<span class="agency">${escHtml(job.agency || '')}</span>` +
       (meta ? `<span class="sep">·</span><span class="meta">${escHtml(meta)}</span>` : '') +
-      `</a>`;
+      `</div>`;
   });
 
   listEl.innerHTML = rows.join('');
+
+  listEl.querySelectorAll('.row').forEach(el => {
+    el.addEventListener('click', function() {
+      const job = sorted[parseInt(this.dataset.idx, 10)];
+      if (job) showDetailView(job);
+    });
+  });
   renderPagination(totalPages);
 }
 
@@ -394,7 +549,57 @@ function buildPageRange(current, total) {
   return result;
 }
 
+// ── Navigation ──
+
+function showListView() {
+  document.getElementById('view-list').style.display = '';
+  document.getElementById('view-detail').style.display = 'none';
+  document.title = 'Laissez-Passer';
+  window.scrollTo(0, 0);
+}
+
+function showDetailView(job) {
+  const grade = parseGrade(job.grade);
+  const loc = jobLocation(job);
+  const date = formatDate(job.deadline);
+
+  document.getElementById('detail-title').textContent = job.job_title || '';
+
+  const badgeClass = grade ? 'badge' : 'badge empty';
+  const badgeText = grade || '—';
+  const metaParts = [loc, date].filter(Boolean);
+  let metaHtml = `<span class="${badgeClass}">${escHtml(badgeText)}</span>`;
+  metaHtml += `<span class="sep">·</span><span class="agency">${escHtml(job.agency || '')}</span>`;
+  if (metaParts.length) {
+    metaHtml += `<span class="sep">·</span><span class="meta">${escHtml(metaParts.join(' · '))}</span>`;
+  }
+  document.getElementById('detail-meta').innerHTML = metaHtml;
+
+  const linkEl = document.getElementById('detail-link');
+  linkEl.href = job.url || '#';
+
+  const descEl = document.getElementById('detail-description');
+  if (job.description) {
+    descEl.innerHTML = marked.parse(job.description);
+  } else {
+    descEl.innerHTML = '<p style="color:#aaa">No description available.</p>';
+  }
+
+  document.getElementById('view-list').style.display = 'none';
+  document.getElementById('view-detail').style.display = 'block';
+  document.title = (job.job_title || 'Job') + ' — Laissez-Passer';
+  window.scrollTo(0, 0);
+}
+
+// ── Init ──
+
 function init() {
+  // Back button
+  document.getElementById('detail-back').addEventListener('click', function(e) {
+    e.preventDefault();
+    showListView();
+  });
+
   // Search
   document.getElementById('search').addEventListener('input', function() {
     filtered = applySearch(this.value.trim());
