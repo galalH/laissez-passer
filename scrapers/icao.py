@@ -1,101 +1,123 @@
+"""ICAO Job Scraper - uses Oracle HCM Cloud REST API (CX_3001)."""
+
 import requests
 from concurrent.futures import ThreadPoolExecutor
-from bs4 import BeautifulSoup
 
-from scrapers._utils import html_to_md
-
-_ORACLE_BASE = "https://estm.fa.em2.oraclecloud.com"
-_DETAIL_API = f"{_ORACLE_BASE}/hcmRestApi/resources/latest/recruitingCEJobRequisitionDetails"
-_DESC_FIELDS = ("ExternalDescriptionStr", "ExternalResponsibilitiesStr", "ExternalQualificationsStr")
-
-
-def _fetch_description(session: requests.Session, job_url: str) -> str | None:
-    try:
-        job_id = job_url.rstrip("/").split("/")[-1]
-        params = {"onlyData": "true", "finder": f'ById;Id="{job_id}",siteNumber=CX_1'}
-        resp = session.get(_DETAIL_API, params=params, timeout=30)
-        resp.raise_for_status()
-        item = (resp.json().get("items") or [{}])[0]
-        parts = [html_to_md(item.get(f) or "") or "" for f in _DESC_FIELDS]
-        return "\n\n".join(p for p in parts if p) or None
-    except Exception:
-        return None
+from scrapers._utils import html_to_md, trim
 
 AGENCY = "ICAO"
 AGENCY_NAME = "International Civil Aviation Organization"
-JOBS_URL = "https://icaocareers.icao.int/careers/"
+BASE_URL = "https://estm.fa.em2.oraclecloud.com"
+JOBS_URL = f"{BASE_URL}/hcmUI/CandidateExperience/en/sites/CX_3001/jobs"
+API_URL = f"{BASE_URL}/hcmRestApi/resources/latest/recruitingCEJobRequisitions"
+DETAIL_API_URL = f"{BASE_URL}/hcmRestApi/resources/latest/recruitingCEJobRequisitionDetails"
+JOB_URL_TEMPLATE = f"{BASE_URL}/hcmUI/CandidateExperience/en/sites/CX_3001/requisitions/job/{{job_id}}"
+
+EXPAND = (
+    "requisitionList.workLocation,"
+    "requisitionList.otherWorkLocations,"
+    "flexFieldsFacet.values,"
+    "requisitionList.requisitionFlexFields"
+)
+FACETS = "LOCATIONS;WORK_LOCATIONS;WORKPLACE_TYPES;TITLES;CATEGORIES;ORGANIZATIONS;POSTING_DATES;FLEX_FIELDS"
+PAGE_SIZE = 100
 
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
-    "Accept-Language": "en-US,en;q=0.5",
+    "Accept": "application/json",
+    "Referer": JOBS_URL,
 }
 
-
-def _parse_deadline(s: str | None) -> str | None:
-    if not s:
-        return None
-    try:
-        day, month, year = s.split("/")
-        return f"{year}-{month}-{day}"
-    except (ValueError, IndexError):
-        return None
+_DESC_FIELDS = ("ExternalDescriptionStr", "ExternalResponsibilitiesStr", "ExternalQualificationsStr")
 
 
-def _split_location(s: str | None) -> tuple[str | None, str | None]:
-    if not s:
+def _split_location(location_str):
+    if not location_str:
         return None, None
-    if "," not in s:
-        return s, None
-    last_comma_idx = s.rfind(",")
-    return s[:last_comma_idx].strip(), s[last_comma_idx + 1:].strip()
+    if "," in location_str:
+        last_comma_idx = location_str.rfind(",")
+        return location_str[:last_comma_idx].strip(), location_str[last_comma_idx + 1:].strip()
+    return location_str.strip(), None
+
+
+def _fetch_detail(session, job_id):
+    try:
+        params = {
+            "expand": "all",
+            "onlyData": "true",
+            "finder": f'ById;Id="{job_id}",siteNumber=CX_3001',
+        }
+        resp = session.get(DETAIL_API_URL, params=params, headers=HEADERS, timeout=30)
+        resp.raise_for_status()
+        item = resp.json().get("items", [{}])[0]
+        grade = None
+        for field in item.get("requisitionFlexFields", []):
+            if field.get("Prompt") == "Grade":
+                grade = field.get("Value") or None
+                break
+        end_date = item.get("ExternalPostedEndDate") or None
+        deadline = end_date[:10] if end_date else None
+        parts = [html_to_md(item.get(f) or "") or "" for f in _DESC_FIELDS]
+        description = "\n\n".join(p for p in parts if p) or None
+        description = trim(
+            description,
+            before="ICAO Core Values: Integrity, Professionalism, Respect for Diversity.**\n\n",
+        )
+        return grade, deadline, description
+    except Exception:
+        return None, None, None
 
 
 def scrape() -> list[dict]:
     session = requests.Session()
-    session.headers.update(HEADERS)
-    response = session.get(JOBS_URL, timeout=30)
-    response.raise_for_status()
-
-    soup = BeautifulSoup(response.text, "html.parser")
-    table = soup.find("table", class_="tablePag")
-    if not table:
-        return []
-    tbody = table.find("tbody")
-    if not tbody:
-        return []
-
     stubs = []
-    for row in tbody.find_all("tr"):
-        cells = row.find_all("td")
-        if len(cells) != 5:
-            continue
-        link = cells[0].find("a")
-        if not link:
-            continue
-        job_title = link.get_text(strip=True)
-        url = link.get("href", "").strip()
-        if not job_title or not url:
-            continue
-        if url.startswith("/"):
-            url = "https://icaocareers.icao.int" + url
-        stubs.append({
-            "agency": AGENCY,
-            "agency_name": AGENCY_NAME,
-            "job_title": job_title,
-            "grade": cells[1].get_text(strip=True) or None,
-            "city": _split_location(cells[3].get_text(strip=True) or None)[0],
-            "country": _split_location(cells[3].get_text(strip=True) or None)[1],
-            "deadline": _parse_deadline(cells[4].get_text(strip=True) or None),
-            "url": url,
-        })
+    offset = 0
+
+    while True:
+        finder = (
+            f"findReqs;siteNumber=CX_3001,"
+            f"facetsList={FACETS},"
+            f"limit={PAGE_SIZE},"
+            f"offset={offset},"
+            f"sortBy=POSTING_DATES_DESC"
+        )
+        params = {"onlyData": "true", "expand": EXPAND, "finder": finder}
+        try:
+            resp = session.get(API_URL, params=params, headers=HEADERS, timeout=30)
+            resp.raise_for_status()
+            data = resp.json()
+        except Exception:
+            break
+
+        result = data.get("items", [{}])[0] if data.get("items") else {}
+        req_list = result.get("requisitionList", [])
+        total = result.get("TotalJobsCount", 0)
+        if not req_list:
+            break
+
+        for item in req_list:
+            job_id = item.get("Id")
+            job_title = item.get("Title", "")
+            if not job_title:
+                continue
+            location_str = item.get("PrimaryLocation") or None
+            city, country = _split_location(location_str)
+            job_url = JOB_URL_TEMPLATE.format(job_id=job_id) if job_id else JOBS_URL
+            stubs.append({"_id": job_id, "agency": AGENCY, "agency_name": AGENCY_NAME,
+                          "job_title": job_title, "city": city, "country": country, "url": job_url})
+
+        if len(stubs) >= total:
+            break
+        offset += PAGE_SIZE
 
     with ThreadPoolExecutor(max_workers=10) as ex:
-        futures = [ex.submit(_fetch_description, session, s["url"]) for s in stubs]
-    for stub, fut in zip(stubs, futures):
-        stub["description"] = fut.result()
+        futures = [(s, ex.submit(_fetch_detail, session, s.pop("_id"))) for s in stubs]
 
-    return stubs
+    jobs = []
+    for stub, fut in futures:
+        grade, deadline, description = fut.result()
+        jobs.append({**stub, "grade": grade, "deadline": deadline, "description": description})
+    return jobs
 
 
 if __name__ == "__main__":
