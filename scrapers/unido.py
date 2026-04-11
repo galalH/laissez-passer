@@ -63,6 +63,7 @@ def _fetch_description(session, job_url: str) -> str | None:
         return trim(
             html_to_md(str(el)),
             start=re.compile(r"\*+ORGANIZATIONAL CONTEXT", re.IGNORECASE),
+            before="Such core functions are carried out in Divisions/Offices in its Headquarters, Sub-regional Offices and Country Offices.",
             after=re.compile(r"\n[^\n]*?\*+[^*\n]*competencies[^*\n]*\*+", re.IGNORECASE),
         )
     except Exception:
