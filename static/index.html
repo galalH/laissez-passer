@@ -510,7 +510,8 @@ function applySearch(query) {
       (job.agency || '').toLowerCase().includes(q) ||
       (job.city || '').toLowerCase().includes(q) ||
       (job.country || '').toLowerCase().includes(q) ||
-      (job.deadline || '').toLowerCase().includes(q)
+      (job.deadline || '').toLowerCase().includes(q) ||
+      (job.description || '').toLowerCase().includes(q)
     );
   });
 }
