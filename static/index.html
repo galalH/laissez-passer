@@ -897,6 +897,7 @@ function init() {
   });
   document.getElementById('search').addEventListener('keydown', function(e) {
     if (e.key === 'Enter') {
+      e.stopPropagation();
       this.blur();
       if (selectedIdx < 0 && currentSorted.length > 0) {
         selectedIdx = 0;
@@ -961,7 +962,9 @@ function init() {
       renderList();
       requestAnimationFrame(function() {
         calculatePageSize();
+        selectedIdx = 0;
         renderList();
+        applySelection();
       });
     })
     .catch(err => {
@@ -1011,7 +1014,9 @@ function init() {
                 .then(data => {
                   allJobs = Array.isArray(data) ? data : (data.jobs || []);
                   updatedAt = data.updated || null;
-                  filtered = applySearch(document.getElementById('search').value.trim());
+                  const searchEl = document.getElementById('search');
+                  searchEl.value = '';
+                  filtered = applySearch('');
                   selectedIdx = -1;
                   currentPage = 1;
                   renderUpdatedAt();
