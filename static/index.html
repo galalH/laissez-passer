@@ -803,8 +803,9 @@ document.addEventListener('keydown', function(e) {
     case 'h':
       if (currentPage > 1) {
         currentPage--;
-        selectedIdx = -1;
+        selectedIdx = (currentPage - 1) * PAGE_SIZE;
         renderList();
+        applySelection();
         window.scrollTo(0, 0);
       }
       break;
@@ -812,8 +813,9 @@ document.addEventListener('keydown', function(e) {
       const totalPages = Math.ceil(currentSorted.length / PAGE_SIZE);
       if (currentPage < totalPages) {
         currentPage++;
-        selectedIdx = -1;
+        selectedIdx = (currentPage - 1) * PAGE_SIZE;
         renderList();
+        applySelection();
         window.scrollTo(0, 0);
       }
       break;
@@ -894,7 +896,13 @@ function init() {
     }
   });
   document.getElementById('search').addEventListener('keydown', function(e) {
-    if (e.key === 'Enter') { this.blur(); }
+    if (e.key === 'Enter') {
+      this.blur();
+      if (selectedIdx < 0 && currentSorted.length > 0) {
+        selectedIdx = 0;
+        applySelection();
+      }
+    }
   });
   document.getElementById('search').addEventListener('input', function() {
     filtered = applySearch(this.value.trim());
