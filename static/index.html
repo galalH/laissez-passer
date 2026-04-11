@@ -884,6 +884,18 @@ function init() {
   });
 
   // Search
+  document.getElementById('search').addEventListener('focus', function() {
+    if (this.value) {
+      this.value = '';
+      filtered = allJobs.slice();
+      selectedIdx = -1;
+      currentPage = 1;
+      renderList();
+    }
+  });
+  document.getElementById('search').addEventListener('keydown', function(e) {
+    if (e.key === 'Enter') { this.blur(); }
+  });
   document.getElementById('search').addEventListener('input', function() {
     filtered = applySearch(this.value.trim());
     selectedIdx = -1;

@@ -123,14 +123,13 @@ def _fetch_job(session: requests.Session, job_id: int) -> dict | None:
         )
         deadline = _parse_deadline(deadline_m.group(1)) if deadline_m else None
 
-        desc_table = next(
-            (t for t in soup.find_all("table")
-             if len(t.get_text(strip=True)) > 100
-             and "Grade Level" not in t.get_text()
-             and "friend" not in t.get_text()),
-            None
-        )
-        description = html_to_md(str(desc_table)) if desc_table else None
+        description = None
+        posting = soup.find("div", class_="externalPosting")
+        if posting:
+            # Skip the first three element children (div, div, p) which are metadata/header
+            elements = [c for c in posting.children if getattr(c, 'name', None)]
+            content_html = ''.join(str(c) for c in elements[3:])
+            description = html_to_md(content_html) if content_html else None
 
         return {
             "agency": AGENCY,
