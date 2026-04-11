@@ -1,6 +1,10 @@
 import re
 import json
 import requests
+from urllib.parse import unquote
+from concurrent.futures import ThreadPoolExecutor
+
+from scrapers._utils import html_to_md
 
 AGENCY = "FAO"
 AGENCY_NAME = "Food and Agriculture Organization"
@@ -76,23 +80,34 @@ def parse_location(location_str):
     return (location_str, None)
 
 
-def fetch_grade(session: requests.Session, job_url: str) -> str | None:
-    """Fetch job detail page and extract grade.
-    When Grade Level is N/A, returns the text before the parenthesis in
-    the Type of Requisition field (e.g. 'NPP' from 'NPP (National Project Personnel)')."""
+def fetch_detail(session: requests.Session, job_url: str) -> tuple[str | None, str | None]:
+    """Fetch job detail page and return (grade, description).
+    When Grade Level is N/A, grade is the text before the parenthesis in
+    the Type of Requisition field (e.g. 'NPP' from 'NPP (National Project Personnel)').
+    Description is extracted from URL-encoded HTML blocks embedded in the page."""
     try:
         r = session.get(job_url, timeout=30)
-        # Standard grade code (e.g. 'P-5', 'G-3')
-        grades = re.findall(r"'([A-Z]-\d)'", r.text)
+        html = r.text
+
+        # Grade: standard code (e.g. 'P-5', 'G-3') or Type of Requisition fallback
+        grades = re.findall(r"'([A-Z]-\d)'", html)
         if grades:
-            return grades[0]
-        # Grade Level is N/A — extract Type of Requisition text before parenthesis
-        m = re.search(r'!([^!(|\n]+?)\s*(?:\([^)]+\)\s*)?!\|![^!]*!\|!N/A!', r.text)
-        if m:
-            return m.group(1).strip()
-        return None
+            grade = grades[0]
+        else:
+            m = re.search(r'!([^!(|\n]+?)\s*(?:\([^)]+\)\s*)?!\|![^!]*!\|!N/A!', html)
+            grade = m.group(1).strip() if m else None
+
+        # Description: longest URL-encoded HTML block (%3C...) in the page
+        encoded_blocks = re.findall(r'!(%3C[^!]{500,})!', html, re.IGNORECASE)
+        description = None
+        if encoded_blocks:
+            best = max(encoded_blocks, key=len)
+            decoded = unquote(best.replace('%5C:', ':'))
+            description = html_to_md(decoded)
+
+        return grade, description
     except Exception:
-        return None
+        return None, None
 
 
 def parse_deadline(deadline_str):
@@ -116,7 +131,7 @@ def scrape() -> list[dict]:
     session = requests.Session()
     session.headers.update(HEADERS)
 
-    jobs = []
+    stubs = []
     seen_ids = set()
     page_no = 1
     total_count = None
@@ -144,7 +159,6 @@ def scrape() -> list[dict]:
             contest_no = item.get("contestNo", "")
             job_id = item.get("jobId", "")
 
-            # Use contest_no as unique identifier if available, fallback to job_id
             unique_id = contest_no or job_id
             if unique_id in seen_ids:
                 continue
@@ -153,34 +167,30 @@ def scrape() -> list[dict]:
             new_items_on_page += 1
 
             job_title = columns[0] if len(columns) > 0 else ""
-            job_type = columns[2] if len(columns) > 2 else ""
             location_raw = columns[4] if len(columns) > 4 else None
             deadline_raw = columns[6] if len(columns) > 6 else None
 
             city, country = parse_location(location_raw)
             deadline = parse_deadline(deadline_raw)
-
             job_url = f"{JOB_DETAIL_BASE}{contest_no}" if contest_no else f"{JOB_DETAIL_BASE}{job_id}"
-
-            grade = fetch_grade(session, job_url)
-
-            jobs.append({
-                "agency": AGENCY,
-                "agency_name": AGENCY_NAME,
-                "job_title": job_title,
-                "grade": grade,
-                "city": city,
-                "country": country,
-                "deadline": deadline,
-                "url": job_url,
+            stubs.append({
+                "agency": AGENCY, "agency_name": AGENCY_NAME,
+                "job_title": job_title, "city": city, "country": country,
+                "deadline": deadline, "url": job_url,
             })
 
-        # Stop if we got no new items (duplicate page) or fewer items than page size
         if new_items_on_page == 0 or len(requisitions) < page_size:
             break
 
         page_no += 1
 
+    with ThreadPoolExecutor(max_workers=10) as ex:
+        futures = [(s, ex.submit(fetch_detail, session, s["url"])) for s in stubs]
+
+    jobs = []
+    for stub, fut in futures:
+        grade, description = fut.result()
+        jobs.append({**stub, "grade": grade, "description": description})
     return jobs
 
 

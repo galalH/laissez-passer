@@ -1,5 +1,25 @@
 import requests
+from concurrent.futures import ThreadPoolExecutor
 from bs4 import BeautifulSoup
+
+from scrapers._utils import html_to_md
+
+_ORACLE_BASE = "https://estm.fa.em2.oraclecloud.com"
+_DETAIL_API = f"{_ORACLE_BASE}/hcmRestApi/resources/latest/recruitingCEJobRequisitionDetails"
+_DESC_FIELDS = ("ExternalDescriptionStr", "ExternalResponsibilitiesStr", "ExternalQualificationsStr")
+
+
+def _fetch_description(session: requests.Session, job_url: str) -> str | None:
+    try:
+        job_id = job_url.rstrip("/").split("/")[-1]
+        params = {"onlyData": "true", "finder": f'ById;Id="{job_id}",siteNumber=CX_1'}
+        resp = session.get(_DETAIL_API, params=params, timeout=30)
+        resp.raise_for_status()
+        item = (resp.json().get("items") or [{}])[0]
+        parts = [html_to_md(item.get(f) or "") or "" for f in _DESC_FIELDS]
+        return "\n\n".join(p for p in parts if p) or None
+    except Exception:
+        return None
 
 AGENCY = "ICAO"
 AGENCY_NAME = "International Civil Aviation Organization"
@@ -13,7 +33,6 @@ HEADERS = {
 
 
 def _parse_deadline(s: str | None) -> str | None:
-    """Convert deadline from DD/MM/YYYY to YYYY-MM-DD format."""
     if not s:
         return None
     try:
@@ -24,79 +43,59 @@ def _parse_deadline(s: str | None) -> str | None:
 
 
 def _split_location(s: str | None) -> tuple[str | None, str | None]:
-    """Split location into city and country.
-
-    Returns (city, country) tuple.
-    If comma present: everything before last comma is city, last part is country.
-    If no comma: city is the value, country is None.
-    """
     if not s:
         return None, None
-
     if "," not in s:
         return s, None
-
-    # Split on last comma
     last_comma_idx = s.rfind(",")
-    city = s[:last_comma_idx].strip()
-    country = s[last_comma_idx + 1:].strip()
-
-    return city, country
+    return s[:last_comma_idx].strip(), s[last_comma_idx + 1:].strip()
 
 
 def scrape() -> list[dict]:
-    response = requests.get(JOBS_URL, headers=HEADERS, timeout=30)
+    session = requests.Session()
+    session.headers.update(HEADERS)
+    response = session.get(JOBS_URL, timeout=30)
     response.raise_for_status()
 
     soup = BeautifulSoup(response.text, "html.parser")
-
     table = soup.find("table", class_="tablePag")
     if not table:
         return []
-
     tbody = table.find("tbody")
     if not tbody:
         return []
 
-    jobs = []
+    stubs = []
     for row in tbody.find_all("tr"):
         cells = row.find_all("td")
-
         if len(cells) != 5:
             continue
-
-        title_cell = cells[0]
-        link = title_cell.find("a")
+        link = cells[0].find("a")
         if not link:
             continue
-
         job_title = link.get_text(strip=True)
         url = link.get("href", "").strip()
-
         if not job_title or not url:
             continue
-
         if url.startswith("/"):
             url = "https://icaocareers.icao.int" + url
-
-        grade = cells[1].get_text(strip=True) or None
-        location_str = cells[3].get_text(strip=True) or None
-        deadline_str = cells[4].get_text(strip=True) or None
-
-        city, country = _split_location(location_str)
-
-        jobs.append({
+        stubs.append({
             "agency": AGENCY,
             "agency_name": AGENCY_NAME,
             "job_title": job_title,
-            "grade": grade,
-            "city": city,
-            "country": country,
-            "deadline": _parse_deadline(deadline_str),
+            "grade": cells[1].get_text(strip=True) or None,
+            "city": _split_location(cells[3].get_text(strip=True) or None)[0],
+            "country": _split_location(cells[3].get_text(strip=True) or None)[1],
+            "deadline": _parse_deadline(cells[4].get_text(strip=True) or None),
             "url": url,
         })
 
-    return jobs
+    with ThreadPoolExecutor(max_workers=10) as ex:
+        futures = [ex.submit(_fetch_description, session, s["url"]) for s in stubs]
+    for stub, fut in zip(stubs, futures):
+        stub["description"] = fut.result()
+
+    return stubs
 
 
 if __name__ == "__main__":

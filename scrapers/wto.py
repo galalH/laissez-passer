@@ -3,12 +3,15 @@
 import requests
 import json
 import re
+from concurrent.futures import ThreadPoolExecutor
+
+from scrapers._utils import html_to_md
 
 AGENCY = "WTO"
 AGENCY_NAME = "World Trade Organization"
 JOBS_URL = "https://wto.wd103.myworkdayjobs.com/External"
-
 API_URL = "https://wto.wd103.myworkdayjobs.com/wday/cxs/wto/External/jobs"
+DETAIL_BASE = "https://wto.wd103.myworkdayjobs.com/wday/cxs/wto/External"
 
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
@@ -18,8 +21,17 @@ HEADERS = {
 }
 
 
+def _fetch_detail(session, external_path):
+    try:
+        detail = session.get(f"{DETAIL_BASE}{external_path}", headers=HEADERS, timeout=30)
+        detail.raise_for_status()
+        desc_html = detail.json().get("jobPostingInfo", {}).get("jobDescription", "")
+        return html_to_md(desc_html)
+    except Exception:
+        return None
+
+
 def _parse_deadline(s):
-    """Extract deadline in YYYY-MM-DD format from text containing DD-MM-YYYY."""
     if not s:
         return None
     m = re.search(r'\b(\d{2})-(\d{2})-(\d{4})\b', s)
@@ -29,14 +41,15 @@ def _parse_deadline(s):
 
 
 def scrape() -> list[dict]:
-    jobs = []
+    stubs = []
     offset = 0
     limit = 20
+    session = requests.Session()
 
     while True:
         try:
             payload = {"appliedFacets": {}, "limit": limit, "offset": offset, "searchText": ""}
-            resp = requests.post(API_URL, json=payload, headers=HEADERS, timeout=30)
+            resp = session.post(API_URL, json=payload, headers=HEADERS, timeout=30)
             resp.raise_for_status()
             data = resp.json()
 
@@ -46,38 +59,37 @@ def scrape() -> list[dict]:
 
             for job in postings:
                 title = job.get("title", "")
-                location = job.get("locationsText") or None
-
                 deadline = None
                 bullet = job.get("bulletFields", [])
                 if len(bullet) > 1:
                     deadline = bullet[1]
-
                 external_path = job.get("externalPath", "")
                 if not external_path:
                     continue
                 slug = external_path.rstrip("/").split("/")[-1]
                 url = f"https://wto.wd103.myworkdayjobs.com/en-US/External/details/{slug}"
-
-                jobs.append({
-                    "agency": AGENCY,
-                    "agency_name": AGENCY_NAME,
-                    "job_title": title,
-                    "grade": None,
-                    "city": "Geneva",
-                    "country": "Switzerland",
-                    "deadline": _parse_deadline(deadline),
-                    "url": url,
+                stubs.append({
+                    "_path": external_path,
+                    "agency": AGENCY, "agency_name": AGENCY_NAME,
+                    "job_title": title, "grade": None,
+                    "city": "Geneva", "country": "Switzerland",
+                    "deadline": _parse_deadline(deadline), "url": url,
                 })
 
             total = data.get("total", 0)
             if offset + limit >= total:
                 break
             offset += limit
-
         except Exception:
             break
 
+    with ThreadPoolExecutor(max_workers=10) as ex:
+        futures = [(s, ex.submit(_fetch_detail, session, s.pop("_path"))) for s in stubs]
+
+    jobs = []
+    for stub, fut in futures:
+        stub["description"] = fut.result()
+        jobs.append(stub)
     return jobs
 
 

@@ -1,6 +1,9 @@
 import requests
 import json
 from bs4 import BeautifulSoup
+from concurrent.futures import ThreadPoolExecutor
+
+from scrapers._utils import html_to_md
 
 AGENCY = "UNIDO"
 AGENCY_NAME = "United Nations Industrial Development Organization"
@@ -49,18 +52,30 @@ def _split_location(s):
     return s.strip(), None
 
 
-def scrape() -> list[dict]:
-    jobs = []
+def _fetch_description(session, job_url: str) -> str | None:
     try:
-        response = requests.get(JOBS_URL, headers=HEADERS, timeout=30)
+        resp = session.get(job_url, timeout=20)
+        resp.raise_for_status()
+        el = BeautifulSoup(resp.content, "html.parser").find(class_="jobdescription")
+        return html_to_md(str(el)) if el else None
+    except Exception:
+        return None
+
+
+def scrape() -> list[dict]:
+    stubs = []
+    try:
+        session = requests.Session()
+        session.headers.update(HEADERS)
+        response = session.get(JOBS_URL, timeout=30)
         response.raise_for_status()
         soup = BeautifulSoup(response.content, "html.parser")
         table = soup.find("table", {"id": "searchresults"})
         if not table:
-            return jobs
+            return stubs
         tbody = table.find("tbody")
         if not tbody:
-            return jobs
+            return stubs
         rows = tbody.find_all("tr", {"class": "data-row"})
         for row in rows:
             title_link = row.find("a", {"class": "jobTitle-link"})
@@ -79,19 +94,19 @@ def scrape() -> list[dict]:
             deadline_str = deadline_span.get_text(strip=True) or None if deadline_span else None
             deadline = _parse_deadline(deadline_str)
             if job_title and job_url:
-                jobs.append({
-                    "agency": AGENCY,
-                    "agency_name": AGENCY_NAME,
-                    "job_title": job_title,
-                    "grade": grade,
-                    "city": city,
-                    "country": country,
-                    "deadline": deadline,
-                    "url": job_url,
+                stubs.append({
+                    "agency": AGENCY, "agency_name": AGENCY_NAME,
+                    "job_title": job_title, "grade": grade,
+                    "city": city, "country": country,
+                    "deadline": deadline, "url": job_url,
                 })
-    except Exception as e:
+    except Exception:
         pass
-    return jobs
+
+    with ThreadPoolExecutor(max_workers=10) as ex:
+        futures = [(s, ex.submit(_fetch_description, session, s["url"])) for s in stubs]
+
+    return [{**stub, "description": fut.result()} for stub, fut in futures]
 
 
 if __name__ == "__main__":

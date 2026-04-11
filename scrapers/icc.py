@@ -5,6 +5,9 @@ import uuid
 import requests
 import country_converter as coco
 from bs4 import BeautifulSoup
+from concurrent.futures import ThreadPoolExecutor
+
+from scrapers._utils import html_to_md
 
 AGENCY = "ICC"
 AGENCY_NAME = "International Criminal Court"
@@ -120,6 +123,15 @@ def _fetch_job(session: requests.Session, job_id: int) -> dict | None:
         )
         deadline = _parse_deadline(deadline_m.group(1)) if deadline_m else None
 
+        desc_table = next(
+            (t for t in soup.find_all("table")
+             if len(t.get_text(strip=True)) > 100
+             and "Grade Level" not in t.get_text()
+             and "friend" not in t.get_text()),
+            None
+        )
+        description = html_to_md(str(desc_table)) if desc_table else None
+
         return {
             "agency": AGENCY,
             "agency_name": AGENCY_NAME,
@@ -129,6 +141,7 @@ def _fetch_job(session: requests.Session, job_id: int) -> dict | None:
             "country": country,
             "deadline": deadline,
             "url": f"{DETAIL_BASE}{job_id}",
+            "description": description,
         }
     except Exception:
         return None
@@ -221,13 +234,10 @@ def scrape() -> list[dict]:
 
     job_ids = _get_job_ids(resp_all.text)
 
-    jobs = []
-    for job_id in job_ids:
-        job = _fetch_job(session, job_id)
-        if job:
-            jobs.append(job)
+    with ThreadPoolExecutor(max_workers=10) as ex:
+        futures = [ex.submit(_fetch_job, session, job_id) for job_id in job_ids]
 
-    return jobs
+    return [job for fut in futures if (job := fut.result()) is not None]
 
 
 if __name__ == "__main__":

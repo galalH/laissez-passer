@@ -2,11 +2,13 @@
 
 import requests
 import json
+from concurrent.futures import ThreadPoolExecutor
+
+from scrapers._utils import html_to_md
 
 AGENCY = "UNHCR"
 AGENCY_NAME = "United Nations High Commissioner for Refugees"
 JOBS_URL = "https://unhcr.wd3.myworkdayjobs.com/External"
-
 API_URL = "https://unhcr.wd3.myworkdayjobs.com/wday/cxs/unhcr/External/jobs"
 DETAIL_BASE = "https://unhcr.wd3.myworkdayjobs.com/wday/cxs/unhcr/External"
 
@@ -19,30 +21,29 @@ HEADERS = {
 
 
 def _split_location(location_str):
-    """Split location string on the last comma to extract city and country.
-
-    Args:
-        location_str: String in "City, Country" format or None
-
-    Returns:
-        Tuple of (city, country). If no comma found, returns (city, None).
-        If input is None, returns (None, None).
-    """
     if location_str is None:
         return None, None
-
     if "," not in location_str:
         return location_str.strip(), None
-
-    # Split on last comma
     parts = location_str.rsplit(",", 1)
-    city = parts[0].strip()
-    country = parts[1].strip()
-    return city, country
+    return parts[0].strip(), parts[1].strip()
+
+
+def _fetch_detail(external_path):
+    try:
+        detail = requests.get(f"{DETAIL_BASE}{external_path}", headers=HEADERS, timeout=30)
+        detail.raise_for_status()
+        info = detail.json().get("jobPostingInfo", {})
+        end_date = info.get("endDate")
+        deadline = end_date[:10] if end_date else None
+        description = html_to_md(info.get("jobDescription") or "")
+        return deadline, description
+    except Exception:
+        return None, None
 
 
 def scrape() -> list[dict]:
-    jobs = []
+    stubs = []
     offset = 0
     limit = 20
 
@@ -61,47 +62,38 @@ def scrape() -> list[dict]:
                 title = job.get("title", "")
                 location_str = job.get("locationsText") or None
                 city, country = _split_location(location_str)
-
                 grade = None
                 bullet = job.get("bulletFields", [])
                 if len(bullet) > 1:
                     grade = bullet[1]
-
                 external_path = job.get("externalPath", "")
                 if not external_path:
                     continue
                 slug = external_path.rstrip("/").split("/")[-1]
                 url = f"https://unhcr.wd3.myworkdayjobs.com/en-US/External/details/{slug}"
-
-                deadline = None
-                try:
-                    detail = requests.get(f"{DETAIL_BASE}{external_path}", headers=HEADERS, timeout=30)
-                    detail.raise_for_status()
-                    end_date = detail.json().get("jobPostingInfo", {}).get("endDate")
-                    if end_date:
-                        deadline = end_date[:10]
-                except Exception:
-                    pass
-
-                jobs.append({
-                    "agency": AGENCY,
-                    "agency_name": AGENCY_NAME,
-                    "job_title": title,
-                    "grade": grade,
-                    "city": city,
-                    "country": country,
-                    "deadline": deadline,
-                    "url": url,
+                stubs.append({
+                    "_path": external_path,
+                    "agency": AGENCY, "agency_name": AGENCY_NAME,
+                    "job_title": title, "grade": grade,
+                    "city": city, "country": country, "url": url,
                 })
 
             total = data.get("total", 0)
             if offset + limit >= total:
                 break
             offset += limit
-
         except Exception:
             break
 
+    with ThreadPoolExecutor(max_workers=10) as ex:
+        futures = [(s, ex.submit(_fetch_detail, s.pop("_path"))) for s in stubs]
+
+    jobs = []
+    for stub, fut in futures:
+        deadline, description = fut.result()
+        stub["deadline"] = deadline
+        stub["description"] = description
+        jobs.append(stub)
     return jobs
 
 

@@ -1,9 +1,13 @@
 """UNOPS Careers Scraper - paginates the SearchJobs page."""
 
+import re
 import requests
 from bs4 import BeautifulSoup
 import json
 from urllib.parse import urljoin
+from concurrent.futures import ThreadPoolExecutor
+
+from scrapers._utils import html_to_md
 
 AGENCY = "UNOPS"
 AGENCY_NAME = "United Nations Office for Project Services"
@@ -33,17 +37,26 @@ def _parse_deadline(s):
     return None
 
 
-def _fetch_contract_level(url, session):
+def _fetch_detail(url, session):
+    """Return (contract_level, description) from a job detail page."""
     try:
         resp = session.get(url, timeout=20)
         resp.raise_for_status()
-        lines = [l.strip() for l in BeautifulSoup(resp.content, "html.parser").get_text("\n").split("\n") if l.strip()]
+        soup = BeautifulSoup(resp.content, "html.parser")
+
+        lines = [l.strip() for l in soup.get_text("\n").split("\n") if l.strip()]
+        grade = None
         for i, line in enumerate(lines):
             if line.lower() == "contract level" and i + 1 < len(lines):
-                return lines[i + 1]
+                grade = lines[i + 1]
+                break
+
+        sections = soup.find_all("div", id=re.compile(r"^section\d+__content$"))
+        description = html_to_md("".join(str(s) for s in sections if s.get_text(strip=True))) or None
+
+        return grade, description
     except Exception:
-        pass
-    return None
+        return None, None
 
 
 def _parse_location(location_str):
@@ -54,7 +67,7 @@ def _parse_location(location_str):
 
 
 def scrape() -> list[dict]:
-    jobs = []
+    stubs = []
     seen_urls = set()
     offset = 0
     records_per_page = 6
@@ -90,27 +103,19 @@ def scrape() -> list[dict]:
                 page_has_new = True
 
                 subtitle = article.find("div", class_="article__header__text__subtitle")
-                location_str = grade = deadline_raw = None
+                location_str = deadline_raw = None
                 if subtitle:
                     ds = subtitle.find("span", class_="list-item-Duty Station")
                     location_str = ds.get_text(strip=True) if ds else None
-                    grade = None
                     po = subtitle.find("span", class_="list-item-posted")
                     deadline_raw = po.get_text(strip=True) if po else None
 
                 city, country = _parse_location(location_str)
                 deadline = _parse_deadline(deadline_raw)
-                grade = _fetch_contract_level(job_url, session)
-
-                jobs.append({
-                    "agency": AGENCY,
-                    "agency_name": AGENCY_NAME,
-                    "job_title": job_title,
-                    "grade": grade,
-                    "city": city,
-                    "country": country,
-                    "deadline": deadline,
-                    "url": job_url,
+                stubs.append({
+                    "agency": AGENCY, "agency_name": AGENCY_NAME,
+                    "job_title": job_title, "city": city, "country": country,
+                    "deadline": deadline, "url": job_url,
                 })
             except Exception:
                 continue
@@ -119,6 +124,13 @@ def scrape() -> list[dict]:
             break
         offset += records_per_page
 
+    with ThreadPoolExecutor(max_workers=10) as ex:
+        futures = [(s, ex.submit(_fetch_detail, s["url"], session)) for s in stubs]
+
+    jobs = []
+    for stub, fut in futures:
+        grade, description = fut.result()
+        jobs.append({**stub, "grade": grade, "description": description})
     return jobs
 
 

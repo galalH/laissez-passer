@@ -3,7 +3,10 @@
 import requests
 import json
 import re
-from urllib.parse import quote
+from urllib.parse import quote, unquote
+from concurrent.futures import ThreadPoolExecutor
+
+from scrapers._utils import html_to_md
 
 AGENCY = "IAEA"
 AGENCY_NAME = "International Atomic Energy Agency"
@@ -68,17 +71,39 @@ def parse_location(location_json_str):
     return location_json_str, None
 
 
-def fetch_closing_date(session: requests.Session, job_url: str) -> str | None:
-    """Fetch a job detail page and extract the closing date."""
+def fetch_detail(session: requests.Session, job_url: str) -> tuple[str | None, str | None]:
+    """Fetch a job detail page and return (deadline, description)."""
     try:
         r = session.get(job_url, timeout=30)
-        dates = re.findall(r"(\d{4}-\d{2}-\d{2}), \d{1,2}:\d{2}:\d{2} [AP]M", r.text)
-        # Dates appear in order: posted, posted, closing, closing — take index 2
-        if len(dates) >= 3:
-            return dates[2]
+        html = r.text
+
+        # Deadline: dates appear in order posted, posted, closing, closing — take index 2
+        dates = re.findall(r"(\d{4}-\d{2}-\d{2}), \d{1,2}:\d{2}:\d{2} [AP]M", html)
+        deadline = dates[2] if len(dates) >= 3 else None
+
+        # Description: longest URL-encoded HTML block (%3C...) delimited by !
+        encoded_blocks = re.findall(r'!(%3C[^!]{500,})!', html, re.IGNORECASE)
+        description = None
+        if encoded_blocks:
+            best = max(encoded_blocks, key=len)
+            decoded = unquote(best.replace('%5C:', ':'))
+            description = html_to_md(decoded)
+        else:
+            # Fallback: description embedded in initialHistory as a large segment where
+            # the leading '<' was split off as a separate %3C segment
+            ih_m = re.search(r'id="initialHistory"[^>]*value="([^"]+)"', html)
+            if ih_m:
+                for seg in ih_m.group(1).split('!'):
+                    if len(seg) > 1000:
+                        decoded = unquote(('<' + seg).replace('%5C:', ':'))
+                        text = html_to_md(decoded)
+                        if text:
+                            description = text
+                            break
+
+        return deadline, description
     except Exception:
-        pass
-    return None
+        return None, None
 
 
 def scrape() -> list[dict]:
@@ -87,7 +112,7 @@ def scrape() -> list[dict]:
     # Establish session/cookies first
     session.get(JOBS_URL, timeout=30)
 
-    jobs = []
+    stubs = []
     seen = set()
     page_no = 1
     total_count = None
@@ -135,17 +160,10 @@ def scrape() -> list[dict]:
             # URL-encode spaces/special chars but keep /, (, ) as-is
             job_id_encoded = quote(contest_no, safe="/()") if contest_no else quote(job_id, safe="/()")
             job_url = f"{JOB_DETAIL_BASE}{job_id_encoded}"
-            deadline = fetch_closing_date(session, job_url)
-
-            jobs.append({
-                "agency": AGENCY,
-                "agency_name": AGENCY_NAME,
-                "job_title": job_title,
-                "grade": grade,
-                "city": city,
-                "country": country,
-                "deadline": deadline,
-                "url": job_url,
+            stubs.append({
+                "agency": AGENCY, "agency_name": AGENCY_NAME,
+                "job_title": job_title, "grade": grade,
+                "city": city, "country": country, "url": job_url,
             })
 
         # Stop only when no new items — don't stop on short page (API count can drift)
@@ -154,6 +172,13 @@ def scrape() -> list[dict]:
 
         page_no += 1
 
+    with ThreadPoolExecutor(max_workers=10) as ex:
+        futures = [(s, ex.submit(fetch_detail, session, s["url"])) for s in stubs]
+
+    jobs = []
+    for stub, fut in futures:
+        deadline, description = fut.result()
+        jobs.append({**stub, "deadline": deadline, "description": description})
     return jobs
 
 

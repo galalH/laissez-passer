@@ -6,8 +6,10 @@ dependencies = [
     "beautifulsoup4",
     "country-converter",
     "flask",
+    "markitdown",
     "pandas",
     "playwright",
+    "pypdf",
     "python-dateutil",
     "requests",
 ]

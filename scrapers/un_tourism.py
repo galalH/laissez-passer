@@ -1,9 +1,12 @@
 """UNWTO Job Scraper - parses the HTML table on the work-with-us page."""
 
+import io
 import requests
 from bs4 import BeautifulSoup
 import json
 import re
+from pypdf import PdfReader
+from concurrent.futures import ThreadPoolExecutor
 
 AGENCY = "UN Tourism"
 AGENCY_NAME = "World Tourism Organization"
@@ -47,11 +50,26 @@ def _split_location(location):
         return location, None
 
 
+def _fetch_description(session: requests.Session, url: str) -> str | None:
+    """Download a PDF URL and extract its text content."""
+    if ".pdf" not in url.split("?")[0].lower():
+        return None
+    try:
+        resp = session.get(url, headers=HEADERS, timeout=30)
+        resp.raise_for_status()
+        reader = PdfReader(io.BytesIO(resp.content))
+        text = "\n".join(page.extract_text() or "" for page in reader.pages).strip()
+        return text or None
+    except Exception:
+        return None
+
+
 def scrape() -> list[dict]:
-    jobs = []
+    stubs = []
+    session = requests.Session()
 
     try:
-        resp = requests.get(JOBS_URL, headers=HEADERS, timeout=30)
+        resp = session.get(JOBS_URL, headers=HEADERS, timeout=30)
         resp.raise_for_status()
         soup = BeautifulSoup(resp.content, "html.parser")
 
@@ -110,21 +128,20 @@ def scrape() -> list[dict]:
                 else:
                     url = JOBS_URL
 
-                jobs.append({
-                    "agency": AGENCY,
-                    "agency_name": AGENCY_NAME,
-                    "job_title": job_title,
-                    "grade": grade,
-                    "city": city,
-                    "country": country,
-                    "deadline": deadline,
-                    "url": url,
+                stubs.append({
+                    "agency": AGENCY, "agency_name": AGENCY_NAME,
+                    "job_title": job_title, "grade": grade,
+                    "city": city, "country": country,
+                    "deadline": deadline, "url": url,
                 })
 
     except Exception:
         pass
 
-    return jobs
+    with ThreadPoolExecutor(max_workers=10) as ex:
+        futures = [(s, ex.submit(_fetch_description, session, s["url"])) for s in stubs]
+
+    return [{**stub, "description": fut.result()} for stub, fut in futures]
 
 
 if __name__ == "__main__":

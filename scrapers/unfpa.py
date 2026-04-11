@@ -3,6 +3,9 @@ from bs4 import BeautifulSoup
 from datetime import datetime
 import re
 import json
+from concurrent.futures import ThreadPoolExecutor
+
+from scrapers._utils import html_to_md
 
 AGENCY = "UNFPA"
 AGENCY_NAME = "United Nations Population Fund"
@@ -75,36 +78,31 @@ def scrape() -> list[dict]:
             seen_urls.add(job_url)
             unique_job_urls.append(job_url)
 
-    # Extract job information from each job page
-    for job_url in unique_job_urls:
+    def _fetch_job(job_url):
         try:
-            job_response = session.get(job_url, timeout=30)
-            job_response.raise_for_status()
-        except Exception as e:
-            print(f"Error fetching job {job_url}: {e}")
-            continue
-
-        job_soup = BeautifulSoup(job_response.content, 'html.parser')
-
-        # Extract job details
-        job_title = extract_job_title(job_soup)
-        grade = extract_grade(job_soup)
-        city, country = extract_location(job_soup)
-        deadline = extract_deadline(job_soup)
-
-        if job_title:  # Only add if we got a title
-            jobs.append({
-                'agency': AGENCY,
-                'agency_name': AGENCY_NAME,
+            resp = session.get(job_url, timeout=30)
+            resp.raise_for_status()
+            job_soup = BeautifulSoup(resp.content, 'html.parser')
+            job_title = extract_job_title(job_soup)
+            if not job_title:
+                return None
+            return {
+                'agency': AGENCY, 'agency_name': AGENCY_NAME,
                 'job_title': job_title,
-                'grade': grade,
-                'city': city,
-                'country': country,
-                'deadline': deadline,
-                'url': job_url
-            })
+                'grade': extract_grade(job_soup),
+                'city': extract_location(job_soup)[0],
+                'country': extract_location(job_soup)[1],
+                'deadline': extract_deadline(job_soup),
+                'url': job_url,
+                'description': extract_description(job_soup),
+            }
+        except Exception:
+            return None
 
-    return jobs
+    with ThreadPoolExecutor(max_workers=10) as ex:
+        futures = [ex.submit(_fetch_job, url) for url in unique_job_urls]
+
+    return [job for fut in futures if (job := fut.result()) is not None]
 
 def extract_job_title(soup):
     h1 = soup.find('h1')
@@ -134,6 +132,17 @@ def _get_form_fields(soup):
         if label and value:
             fields[label.get_text(strip=True).lower()] = value.get_text(strip=True)
     return fields
+
+
+def extract_description(soup):
+    article = soup.find('article')
+    if not article:
+        return None
+    import copy
+    article = copy.copy(article)
+    for fg in article.find_all('div', class_='form-group'):
+        fg.decompose()
+    return html_to_md(str(article))
 
 
 def extract_grade(soup):

@@ -4,6 +4,7 @@ import requests
 from bs4 import BeautifulSoup
 import json
 import re
+from concurrent.futures import ThreadPoolExecutor
 
 AGENCY = "UNITAR"
 AGENCY_NAME = "United Nations Institute for Training and Research"
@@ -68,6 +69,26 @@ def scrape_job_detail(url: str, title: str) -> dict | None:
         article = soup.find("article") or soup.find("main") or soup.body
         lines = [l.strip() for l in article.get_text("\n").split("\n") if l.strip()]
 
+        is_roster = "/roster/" in url
+
+        if is_roster:
+            # Roster pages: no deadline or grade; description starts at overview section
+            overview_idx = next(
+                (i for i, l in enumerate(lines) if "overview" in l.lower()), 1
+            )
+            description = "\n".join(lines[overview_idx:]) or None
+            return {
+                "agency": AGENCY,
+                "agency_name": AGENCY_NAME,
+                "job_title": title,
+                "grade": None,
+                "city": "Geneva",
+                "country": "Switzerland",
+                "deadline": None,
+                "url": url,
+                "description": description,
+            }
+
         location = None
         grade = None
         deadline = None
@@ -89,6 +110,9 @@ def scrape_job_detail(url: str, title: str) -> dict | None:
         city, country = _split_location(location)
         parsed_deadline = _parse_deadline(deadline)
 
+        # Description: full article text
+        description = "\n".join(lines) or None
+
         return {
             "agency": AGENCY,
             "agency_name": AGENCY_NAME,
@@ -98,6 +122,7 @@ def scrape_job_detail(url: str, title: str) -> dict | None:
             "country": country,
             "deadline": parsed_deadline,
             "url": url,
+            "description": description,
         }
     except Exception:
         return None
@@ -112,11 +137,14 @@ def scrape() -> list[dict]:
 
     soup = BeautifulSoup(resp.content, "html.parser")
     seen = set()
-    jobs = []
+    stubs = []  # (url, title) pairs
 
     for link in soup.find_all("a", href=re.compile(r"/vacancy-announcements/")):
         href = link.get("href", "")
         if not re.search(r"/\d+$", href):
+            continue
+        if not (re.search(r"/vacancy-announcements/\d+$", href) or
+                re.search(r"/vacancy-announcements/roster/.+/\d+$", href)):
             continue
         text = link.get_text(strip=True)
         if not text or text in ["Job seekers", "Vacancy Announcements"]:
@@ -125,11 +153,12 @@ def scrape() -> list[dict]:
         if full_url in seen:
             continue
         seen.add(full_url)
-        job = scrape_job_detail(full_url, text)
-        if job:
-            jobs.append(job)
+        stubs.append((full_url, text))
 
-    return jobs
+    with ThreadPoolExecutor(max_workers=10) as ex:
+        futures = [ex.submit(scrape_job_detail, url, title) for url, title in stubs]
+
+    return [job for fut in futures if (job := fut.result()) is not None]
 
 
 if __name__ == "__main__":

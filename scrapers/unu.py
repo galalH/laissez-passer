@@ -7,6 +7,8 @@ import warnings
 from dateutil import parser as dateutil_parser
 from dateutil.parser import UnknownTimezoneWarning
 
+from scrapers._utils import html_to_md
+
 AGENCY = "UNU"
 AGENCY_NAME = "United Nations University"
 JOBS_URL = "https://careers.unu.edu"
@@ -69,6 +71,9 @@ def scrape() -> list[dict]:
         m = GRADE_RE.search(title)
         grade = m.group(1) if m else None
 
+        html_desc = o.get("description") or ""
+        description = html_to_md(html_desc)
+
         jobs.append({
             "agency": AGENCY,
             "agency_name": AGENCY_NAME,
@@ -78,6 +83,7 @@ def scrape() -> list[dict]:
             "country": country,
             "deadline": deadline,
             "url": url,
+            "description": description,
         })
 
     return jobs

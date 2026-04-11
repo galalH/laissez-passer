@@ -4,6 +4,9 @@ import requests
 import json
 import re
 from bs4 import BeautifulSoup
+from concurrent.futures import ThreadPoolExecutor
+
+from scrapers._utils import html_to_md
 
 AGENCY = "World Bank"
 AGENCY_NAME = "World Bank Group"
@@ -60,9 +63,15 @@ def _fetch_detail(session, req_id):
         closing = table.get("Closing Date")
         deadline = _parse_deadline(closing)
 
-        return grade, city, country, deadline
+        # Description: ad HTML minus the metadata table
+        ad_soup = BeautifulSoup(ad, "html.parser")
+        for t in ad_soup.find_all("table"):
+            t.decompose()
+        description = html_to_md(str(ad_soup)) or None
+
+        return grade, city, country, deadline, description
     except Exception:
-        return None, None, None, None
+        return None, None, None, None, None
 
 
 def scrape() -> list[dict]:
@@ -85,7 +94,7 @@ def scrape() -> list[dict]:
         "Origin": "https://worldbankgroup.csod.com",
     })
 
-    jobs = []
+    stubs = []
     seen = set()
     page = 1
     page_size = 25
@@ -135,24 +144,22 @@ def scrape() -> list[dict]:
             if not job_title:
                 continue
 
-            grade, city, country, deadline = _fetch_detail(session, req_id)
             job_url = f"https://worldbankgroup.csod.com/ux/ats/careersite/1/home/requisition/{req_id}?c=worldbankgroup"
+            stubs.append({"_id": req_id, "agency": AGENCY, "agency_name": AGENCY_NAME,
+                          "job_title": job_title, "url": job_url})
 
-            jobs.append({
-                "agency": AGENCY,
-                "agency_name": AGENCY_NAME,
-                "job_title": job_title,
-                "grade": grade,
-                "city": city,
-                "country": country,
-                "deadline": deadline,
-                "url": job_url,
-            })
-
-        if len(jobs) >= total or len(requisitions) < page_size:
+        if len(stubs) >= total or len(requisitions) < page_size:
             break
         page += 1
 
+    with ThreadPoolExecutor(max_workers=10) as ex:
+        futures = [(s, ex.submit(_fetch_detail, session, s.pop("_id"))) for s in stubs]
+
+    jobs = []
+    for stub, fut in futures:
+        grade, city, country, deadline, description = fut.result()
+        jobs.append({**stub, "grade": grade, "city": city, "country": country,
+                     "deadline": deadline, "description": description})
     return jobs
 
 

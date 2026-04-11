@@ -3,6 +3,10 @@
 import re
 import uuid
 import requests
+from bs4 import BeautifulSoup
+from concurrent.futures import ThreadPoolExecutor
+
+from scrapers._utils import html_to_md
 
 AGENCY = "CTBTO"
 AGENCY_NAME = "Preparatory Commission for the Comprehensive Nuclear-Test-Ban Treaty Organization"
@@ -51,8 +55,8 @@ def parse_dwr_jobs(dwr_text: str) -> list[dict]:
     return jobs
 
 
-def fetch_detail(session: requests.Session, job_id: int) -> tuple[str | None, str | None]:
-    """Fetch job detail page and return (grade, deadline)."""
+def fetch_detail(session: requests.Session, job_id: int) -> tuple[str | None, str | None, str | None]:
+    """Fetch job detail page and return (grade, deadline, description)."""
     try:
         r = session.get(f"{DETAIL_BASE}{job_id}", timeout=30)
         html = r.text
@@ -68,9 +72,19 @@ def fetch_detail(session: requests.Session, job_id: int) -> tuple[str | None, st
         )
         deadline = parse_verbose_date(deadline_m.group(1)) if deadline_m else None
 
-        return grade, deadline
+        soup = BeautifulSoup(html, "html.parser")
+        desc_table = next(
+            (t for t in soup.find_all("table")
+             if len(t.get_text(strip=True)) > 100
+             and "Grade Level" not in t.get_text()
+             and "friend" not in t.get_text()),
+            None
+        )
+        description = html_to_md(str(desc_table)) if desc_table else None
+
+        return grade, deadline, description
     except Exception:
-        return None, None
+        return None, None, None
 
 
 def scrape() -> list[dict]:
@@ -130,24 +144,20 @@ def scrape() -> list[dict]:
 
     raw_jobs = parse_dwr_jobs(resp.text)
 
+    with ThreadPoolExecutor(max_workers=10) as ex:
+        futures = [(item, ex.submit(fetch_detail, session, item["id"])) for item in raw_jobs]
+
     jobs = []
-    for item in raw_jobs:
-        job_id = item["id"]
-        raw_title = item["title"]
-
-        grade, deadline = fetch_detail(session, job_id)
-
+    for item, fut in futures:
+        grade, deadline, description = fut.result()
         jobs.append({
-            "agency": AGENCY,
-            "agency_name": AGENCY_NAME,
-            "job_title": raw_title,
-            "grade": grade,
-            "city": "Vienna",
-            "country": "Austria",
+            "agency": AGENCY, "agency_name": AGENCY_NAME,
+            "job_title": item["title"], "grade": grade,
+            "city": "Vienna", "country": "Austria",
             "deadline": deadline,
-            "url": f"{DETAIL_BASE}{job_id}",
+            "url": f"{DETAIL_BASE}{item['id']}",
+            "description": description,
         })
-
     return jobs
 
 

@@ -2,6 +2,9 @@
 
 import requests
 import json
+from concurrent.futures import ThreadPoolExecutor
+
+from scrapers._utils import html_to_md
 
 AGENCY = "WMO"
 AGENCY_NAME = "World Meteorological Organization"
@@ -13,32 +16,17 @@ HEADERS = {
     "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
 }
 
+_DESC_FIELDS = ("ExternalDescriptionStr", "ExternalResponsibilitiesStr", "ExternalQualificationsStr")
+
 
 def _split_location(s):
-    """Split location string into city and country components.
-
-    Args:
-        s: Location string (e.g., "Geneve, Switzerland" or "Home Based")
-
-    Returns:
-        Tuple of (city, country) where both are strings or None
-    """
     if s is None:
         return None, None
-
-    # Check if "Home Based" appears in the string
     if "home based" in s.lower():
-        # Return city="Home Based", country=None
         return "Home Based", None
-
-    # Split on last comma
     if "," in s:
         parts = s.rsplit(",", 1)
-        city = parts[0].strip()
-        country = parts[1].strip()
-        return city, country
-
-    # No comma: return as city, no country
+        return parts[0].strip(), parts[1].strip()
     return s, None
 
 
@@ -59,15 +47,17 @@ def _fetch_detail(session, job_id):
                 break
         end_date = item.get("ExternalPostedEndDate") or None
         deadline = end_date[:10] if end_date else None
-        return grade, deadline
+        parts = [html_to_md(item.get(f) or "") or "" for f in _DESC_FIELDS]
+        description = "\n\n".join(p for p in parts if p) or None
+        return grade, deadline, description
     except Exception:
-        return None, None
+        return None, None, None
 
 
 def scrape() -> list[dict]:
     session = requests.Session()
     session.headers.update(HEADERS)
-    jobs = []
+    stubs = []
     offset = 0
     limit = 25
 
@@ -82,7 +72,6 @@ def scrape() -> list[dict]:
             "expand": "requisitionList.workLocation,requisitionList.otherWorkLocations,requisitionList.secondaryLocations,flexFieldsFacet.values,requisitionList.requisitionFlexFields",
             "finder": finder_param,
         }
-
         try:
             resp = session.get(API_BASE, params=params, timeout=30)
             resp.raise_for_status()
@@ -93,7 +82,6 @@ def scrape() -> list[dict]:
         items = data.get("items", [])
         if not items:
             break
-
         search_result = items[0]
         requisition_list = search_result.get("requisitionList", [])
         if not requisition_list:
@@ -104,29 +92,24 @@ def scrape() -> list[dict]:
             job_id = job.get("Id", "").strip()
             if not job_title or not job_id:
                 continue
-
             location_str = job.get("PrimaryLocation", "").strip() or None
             city, country = _split_location(location_str)
-
-            grade, deadline = _fetch_detail(session, job_id)
             job_url = f"https://estm.fa.em2.oraclecloud.com/hcmUI/CandidateExperience/en/sites/CX_5001/job/{job_id}"
-
-            jobs.append({
-                "agency": AGENCY,
-                "agency_name": AGENCY_NAME,
-                "job_title": job_title,
-                "grade": grade,
-                "city": city,
-                "country": country,
-                "deadline": deadline,
-                "url": job_url,
-            })
+            stubs.append({"_id": job_id, "agency": AGENCY, "agency_name": AGENCY_NAME,
+                          "job_title": job_title, "city": city, "country": country, "url": job_url})
 
         total_jobs = search_result.get("TotalJobsCount", 0)
         if offset + limit >= total_jobs:
             break
         offset += limit
 
+    with ThreadPoolExecutor(max_workers=10) as ex:
+        futures = [(s, ex.submit(_fetch_detail, session, s.pop("_id"))) for s in stubs]
+
+    jobs = []
+    for stub, fut in futures:
+        grade, deadline, description = fut.result()
+        jobs.append({**stub, "grade": grade, "deadline": deadline, "description": description})
     return jobs
 
 

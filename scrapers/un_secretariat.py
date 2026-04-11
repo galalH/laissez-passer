@@ -2,6 +2,8 @@
 
 import requests
 
+from scrapers._utils import html_to_md
+
 AGENCY = "UNS"
 unknown_depts: set[str] = set()
 
@@ -49,8 +51,11 @@ DEPT_ABBR = {
     "Department of Operational Support": "DOS",
     "Department of Political and Peacebuilding Affairs": "DPPA",
     "Department of Peace Operations": "DPO",
+    "United Nations Joint Staff Pension Fund": "UNJSPF",
     "United Nations Joint Staff Pension Fund - Pension Administration": "UNJSPF",
     "United Nations Joint Staff Pension Fund \u2013 Office of Investment Management": "UNJSPF",
+    "Office of the Special Representative of the Secretary-General on Sexual Violence": "SRSG-SVC",
+    "Office of the Special Representative to the Secretary-General on Violence Against Children": "SRSG-VAC",
     "Rosters Administered by Department of Operational Support": "UNS",
     "INDEPENDENT INVESTIGATIVE MECHANISM FOR MYANMAR": "IIMM",
     "United Nations Office for Outer Space Affairs": "UNOOSA",
@@ -76,6 +81,7 @@ DEPT_ABBR = {
     "United Nations Relief and Works Agency (UNRWA)": "UNRWA",
     "UNRWA - Programme Relief & Social Services - Headquarters Amman": "UNRWA",
     "UNRWA - Information Management - Headquarters Amman": "UNRWA",
+    "UNRWA - External Relations - Headquarters Amman": "UNRWA",
 }
 JOBS_URL = "https://careers.un.org/jobopening"
 
@@ -124,6 +130,9 @@ def scrape() -> list[dict]:
             agency_abbr = DEPT_ABBR.get(dept_name, "UNS")
             deadline = item.get("endDate")
 
+            desc_html = item.get("jobDescription") or ""
+            description = html_to_md(desc_html)
+
             all_jobs.append({
                 "agency": agency_abbr,
                 "agency_name": dept_name or "United Nations Secretariat",
@@ -131,9 +140,9 @@ def scrape() -> list[dict]:
                 "grade": item.get("jobLevel"),
                 "city": city,
                 "country": None,
-
                 "deadline": deadline[:10] if deadline else None,
                 "url": f"https://careers.un.org/jobSearchDescription/{item.get('jobId')}",
+                "description": description,
             })
 
         total_count = items[0].get("totalCount", 0) if items else 0

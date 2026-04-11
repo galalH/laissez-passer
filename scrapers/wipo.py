@@ -1,7 +1,12 @@
 """WIPO Job Scraper - uses the Oracle Taleo REST API."""
 
+import re
 import requests
 import json
+from urllib.parse import unquote
+from concurrent.futures import ThreadPoolExecutor
+
+from scrapers._utils import html_to_md
 
 AGENCY = "WIPO"
 AGENCY_NAME = "World Intellectual Property Organization"
@@ -25,6 +30,20 @@ MONTH_MAP = {
     "May": "05", "Jun": "06", "Jul": "07", "Aug": "08",
     "Sep": "09", "Oct": "10", "Nov": "11", "Dec": "12",
 }
+
+
+def fetch_detail(session: requests.Session, job_url: str) -> str | None:
+    """Fetch job detail page and return description markdown."""
+    try:
+        r = session.get(job_url, timeout=30)
+        encoded_blocks = re.findall(r'!(%3C[^!]{500,})!', r.text, re.IGNORECASE)
+        if encoded_blocks:
+            best = max(encoded_blocks, key=len)
+            decoded = unquote(best.replace('%5C:', ':'))
+            return html_to_md(decoded)
+    except Exception:
+        pass
+    return None
 
 
 def parse_deadline(raw):
@@ -54,7 +73,7 @@ def scrape() -> list[dict]:
     session = requests.Session()
     session.headers.update(HEADERS)
 
-    jobs = []
+    stubs = []
     page_no = 1
     total_count = None
     page_size = 25
@@ -83,16 +102,12 @@ def scrape() -> list[dict]:
             grade = (columns[1].strip() or None) if len(columns) > 1 else None
             deadline_raw = columns[8] if len(columns) > 8 else None
 
-            jobs.append({
-                "agency": AGENCY,
-                "agency_name": AGENCY_NAME,
-                "job_title": job_title,
-                "grade": grade or None,
-                "city": "Geneva",
-                "country": "Switzerland",
-
-                "deadline": parse_deadline(deadline_raw),
-                "url": f"{JOB_DETAIL_BASE}{contest_no}" if contest_no else JOBS_URL,
+            job_url = f"{JOB_DETAIL_BASE}{contest_no}" if contest_no else JOBS_URL
+            stubs.append({
+                "agency": AGENCY, "agency_name": AGENCY_NAME,
+                "job_title": job_title, "grade": grade or None,
+                "city": "Geneva", "country": "Switzerland",
+                "deadline": parse_deadline(deadline_raw), "url": job_url,
             })
 
         fetched = (page_no - 1) * page_size + len(requisitions)
@@ -100,6 +115,12 @@ def scrape() -> list[dict]:
             break
         page_no += 1
 
+    with ThreadPoolExecutor(max_workers=10) as ex:
+        futures = [(s, ex.submit(fetch_detail, session, s["url"])) for s in stubs]
+
+    jobs = []
+    for stub, fut in futures:
+        jobs.append({**stub, "description": fut.result()})
     return jobs
 
 

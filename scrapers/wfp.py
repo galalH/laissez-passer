@@ -2,6 +2,9 @@
 
 import requests
 import json
+from concurrent.futures import ThreadPoolExecutor
+
+from scrapers._utils import html_to_md
 
 AGENCY = "WFP"
 AGENCY_NAME = "World Food Programme"
@@ -24,23 +27,23 @@ def _split_location(s):
     if "," not in s:
         return None, s
     parts = s.split(",", 1)
-    city = parts[0].strip() or None
-    country = parts[1].strip() or None
-    return city, country
+    return parts[0].strip() or None, parts[1].strip() or None
 
 
-def _fetch_deadline(session, external_path):
+def _fetch_detail(session, external_path):
     try:
         detail = session.get(f"{DETAIL_BASE}{external_path}", headers=HEADERS, timeout=30)
         detail.raise_for_status()
-        end_date = detail.json().get("jobPostingInfo", {}).get("endDate")
-        return end_date[:10] if end_date else None
+        info = detail.json().get("jobPostingInfo", {})
+        end_date = info.get("endDate")
+        deadline = end_date[:10] if end_date else None
+        description = html_to_md(info.get("jobDescription", ""))
+        return deadline, description
     except Exception:
-        return None
+        return None, None
 
 
 def _fetch_grade_facets(session):
-    """Fetch the first page and return Management_Level facet values as list of (descriptor, id)."""
     try:
         payload = {"appliedFacets": {}, "limit": 1, "offset": 0, "searchText": ""}
         resp = session.post(API_URL, json=payload, headers=HEADERS, timeout=30)
@@ -54,30 +57,25 @@ def _fetch_grade_facets(session):
     return []
 
 
-def _fetch_jobs_for_grade(session, grade_descriptor, grade_id):
-    """Fetch all jobs for a given grade filter. Returns list of job dicts."""
-    jobs = []
+def _collect_stubs_for_grade(session, grade_descriptor, grade_id):
+    """Collect job stubs (without description/deadline) for a given grade."""
+    stubs = []
     offset = 0
     limit = 20
-
     while True:
         try:
             payload = {
                 "appliedFacets": {"Management_Level": [grade_id]},
-                "limit": limit,
-                "offset": offset,
-                "searchText": "",
+                "limit": limit, "offset": offset, "searchText": "",
             }
             resp = session.post(API_URL, json=payload, headers=HEADERS, timeout=30)
             resp.raise_for_status()
             data = resp.json()
         except Exception:
             break
-
         postings = data.get("jobPostings", [])
         if not postings:
             break
-
         for job in postings:
             external_path = job.get("externalPath", "")
             if not external_path:
@@ -85,36 +83,38 @@ def _fetch_jobs_for_grade(session, grade_descriptor, grade_id):
             slug = external_path.rstrip("/").split("/")[-1]
             url = f"https://wd3.myworkdaysite.com/en-US/recruiting/wfp/job_openings/details/{slug}"
             city, country = _split_location(job.get("locationsText"))
-            deadline = _fetch_deadline(session, external_path)
-
-            jobs.append({
-                "agency": AGENCY,
-                "agency_name": AGENCY_NAME,
+            stubs.append({
+                "_path": external_path,
+                "agency": AGENCY, "agency_name": AGENCY_NAME,
                 "job_title": job.get("title", ""),
                 "grade": grade_descriptor,
-                "city": city,
-                "country": country,
-                "deadline": deadline,
-                "url": url,
+                "city": city, "country": country, "url": url,
             })
-
         total = data.get("total", 0)
         if offset + limit >= total:
             break
         offset += limit
-
-    return jobs
+    return stubs
 
 
 def scrape() -> list[dict]:
     session = requests.Session()
-    all_jobs = []
+    all_stubs = []
 
     grade_facets = _fetch_grade_facets(session)
     for descriptor, grade_id in grade_facets:
-        all_jobs.extend(_fetch_jobs_for_grade(session, descriptor, grade_id))
+        all_stubs.extend(_collect_stubs_for_grade(session, descriptor, grade_id))
 
-    return all_jobs
+    with ThreadPoolExecutor(max_workers=10) as ex:
+        futures = [(s, ex.submit(_fetch_detail, session, s.pop("_path"))) for s in all_stubs]
+
+    jobs = []
+    for stub, fut in futures:
+        deadline, description = fut.result()
+        stub["deadline"] = deadline
+        stub["description"] = description
+        jobs.append(stub)
+    return jobs
 
 
 if __name__ == "__main__":

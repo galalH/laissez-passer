@@ -4,6 +4,9 @@ import requests
 from bs4 import BeautifulSoup
 import re
 from dateutil import parser as dateutil_parser
+from concurrent.futures import ThreadPoolExecutor
+
+from scrapers._utils import html_to_md
 
 AGENCY = "ITU"
 AGENCY_NAME = "International Telecommunication Union"
@@ -46,7 +49,7 @@ def _split_location(s):
 
 
 def _get_job_details(job_url, session):
-    """Fetch grade and deadline from vacancy notice page."""
+    """Fetch grade, deadline, and description from vacancy notice page."""
     try:
         resp = session.get(job_url, timeout=20)
         resp.raise_for_status()
@@ -72,9 +75,12 @@ def _get_job_details(job_url, session):
             except Exception:
                 deadline = raw
 
-        return grade, deadline
+        desc_el = soup.find(class_="jobdescription")
+        description = html_to_md(str(desc_el)) if desc_el else None
+
+        return grade, deadline, description
     except Exception:
-        return None, None
+        return None, None, None
 
 
 def scrape_page(url, session):
@@ -140,30 +146,28 @@ def scrape() -> list[dict]:
         except Exception:
             pass
 
-    results = []
     seen_urls = set()
-
+    unique_jobs = []
     for job in all_jobs:
         url = job["url"]
         if url in seen_urls:
             continue
         seen_urls.add(url)
+        unique_jobs.append(job)
 
-        grade, deadline = _get_job_details(url, session)
+    with ThreadPoolExecutor(max_workers=10) as ex:
+        futures = [(job, ex.submit(_get_job_details, job["url"], session)) for job in unique_jobs]
 
-        # Skip non-English listings (deadline is None for French/other-language duplicates
-        # that share the same content but different URL; keep if deadline found or no English twin)
+    results = []
+    for job, fut in futures:
+        grade, deadline, description = fut.result()
         results.append({
-            "agency": AGENCY,
-            "agency_name": AGENCY_NAME,
-            "job_title": job["job_title"],
-            "grade": grade,
-            "city": job["city"],
-            "country": job["country"],
-            "deadline": deadline,
-            "url": url,
+            "agency": AGENCY, "agency_name": AGENCY_NAME,
+            "job_title": job["job_title"], "grade": grade,
+            "city": job["city"], "country": job["country"],
+            "deadline": deadline, "url": job["url"],
+            "description": description,
         })
-
     return results
 
 

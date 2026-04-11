@@ -2,6 +2,9 @@
 
 import re
 import requests
+from concurrent.futures import ThreadPoolExecutor
+
+from scrapers._utils import html_to_md
 
 AGENCY = "UN Women"
 AGENCY_NAME = "United Nations Entity for Gender Equality and the Empowerment of Women"
@@ -32,20 +35,19 @@ HEADERS = {
     "Referer": JOBS_URL,
 }
 
+_DESC_FIELDS = ("ExternalDescriptionStr", "ExternalResponsibilitiesStr", "ExternalQualificationsStr")
+
 
 def _split_location(location_str):
     if not location_str:
         return None, None
     if "," in location_str:
         last_comma_idx = location_str.rfind(",")
-        city = location_str[:last_comma_idx].strip()
-        country = location_str[last_comma_idx + 1:].strip()
-        return city, country
+        return location_str[:last_comma_idx].strip(), location_str[last_comma_idx + 1:].strip()
     return location_str.strip(), None
 
 
 def _fetch_detail(session, job_id):
-    """Fetch grade and deadline from job detail API."""
     try:
         params = {
             "expand": "all",
@@ -62,14 +64,16 @@ def _fetch_detail(session, job_id):
                 break
         end_date = item.get("ExternalPostedEndDate") or None
         deadline = end_date[:10] if end_date else None
-        return grade, deadline
+        parts = [html_to_md(item.get(f) or "") or "" for f in _DESC_FIELDS]
+        description = "\n\n".join(p for p in parts if p) or None
+        return grade, deadline, description
     except Exception:
-        return None, None
+        return None, None, None
 
 
 def scrape() -> list[dict]:
     session = requests.Session()
-    jobs = []
+    stubs = []
     offset = 0
 
     while True:
@@ -91,7 +95,6 @@ def scrape() -> list[dict]:
         result = data.get("items", [{}])[0] if data.get("items") else {}
         req_list = result.get("requisitionList", [])
         total = result.get("TotalJobsCount", 0)
-
         if not req_list:
             break
 
@@ -100,32 +103,27 @@ def scrape() -> list[dict]:
             job_title = item.get("Title", "")
             if not job_title:
                 continue
-
             location_str = item.get("PrimaryLocation") or None
             city, country = _split_location(location_str)
             job_url = JOB_URL_TEMPLATE.format(job_id=job_id) if job_id else JOBS_URL
+            stubs.append({"_id": job_id, "agency": AGENCY, "agency_name": AGENCY_NAME,
+                          "job_title": job_title, "city": city, "country": country, "url": job_url})
 
-            grade, deadline = _fetch_detail(session, job_id) if job_id else (None, None)
-            if grade is None:
-                m = GRADE_RE.search(job_title)
-                if m:
-                    grade = re.sub(r'\s+', '-', m.group(1).upper())
-
-            jobs.append({
-                "agency": AGENCY,
-                "agency_name": AGENCY_NAME,
-                "job_title": job_title,
-                "grade": grade,
-                "city": city,
-                "country": country,
-                "deadline": deadline,
-                "url": job_url,
-            })
-
-        if len(jobs) >= total:
+        if len(stubs) >= total:
             break
         offset += PAGE_SIZE
 
+    with ThreadPoolExecutor(max_workers=10) as ex:
+        futures = [(s, ex.submit(_fetch_detail, session, s.pop("_id"))) for s in stubs]
+
+    jobs = []
+    for stub, fut in futures:
+        grade, deadline, description = fut.result()
+        if grade is None:
+            m = GRADE_RE.search(stub["job_title"])
+            if m:
+                grade = re.sub(r'\s+', '-', m.group(1).upper())
+        jobs.append({**stub, "grade": grade, "deadline": deadline, "description": description})
     return jobs
 
 

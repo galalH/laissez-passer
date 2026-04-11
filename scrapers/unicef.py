@@ -5,6 +5,8 @@ import requests
 import xml.etree.ElementTree as ET
 from dateutil import parser as dateutil_parser
 
+from scrapers._utils import html_to_md
+
 AGENCY = "UNICEF"
 AGENCY_NAME = "United Nations Children's Fund"
 RSS_URL = "https://careers.pageuppeople.com/671/cw/en/rss"
@@ -68,6 +70,9 @@ def scrape() -> list[dict]:
         grade_m = GRADE_RE.search(title)
         grade = re.sub(r'\s+', '-', grade_m.group(1).upper()) if grade_m else None
 
+        html_desc = item.findtext(f"{{{JOB_NS}}}description") or ""
+        description = html_to_md(html_desc)
+
         jobs.append({
             "agency": AGENCY,
             "agency_name": AGENCY_NAME,
@@ -77,6 +82,7 @@ def scrape() -> list[dict]:
             "country": country,
             "deadline": deadline,
             "url": url,
+            "description": description,
         })
 
     return jobs

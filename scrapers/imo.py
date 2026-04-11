@@ -1,6 +1,9 @@
 """IMO Job Scraper - uses the IMO vacancy portal JSON API."""
 
 import requests
+from bs4 import BeautifulSoup
+
+from scrapers._utils import html_to_md
 
 AGENCY = "IMO"
 AGENCY_NAME = "International Maritime Organization"
@@ -40,6 +43,26 @@ def _normalize_grade(grade):
     return grade.replace(".", "")
 
 
+_DESCRIPTION_FIELDS = (
+    "purposeforthepost",
+    "maindutiesandresponsibilities",
+    "requiredcompetencies",
+    "professionalexperience",
+    "education",
+    "languageskills",
+    "otherskills",
+)
+
+
+def _parse_description(job: dict) -> str | None:
+    parts = []
+    for field in _DESCRIPTION_FIELDS:
+        md = html_to_md(job.get(field) or "")
+        if md:
+            parts.append(md)
+    return "\n\n".join(parts) or None
+
+
 def _parse_job(job):
     job_id = job.get("jobVacancyId", "")
     job_title = job.get("title", "")
@@ -60,6 +83,7 @@ def _parse_job(job):
         "country": "United Kingdom",
         "deadline": _parse_deadline(deadline),
         "url": url,
+        "description": _parse_description(job),
     }
 
 

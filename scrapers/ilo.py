@@ -2,6 +2,10 @@
 
 import re
 import requests
+from bs4 import BeautifulSoup
+from concurrent.futures import ThreadPoolExecutor
+
+from scrapers._utils import html_to_md
 
 AGENCY = "ILO"
 AGENCY_NAME = "International Labour Organization"
@@ -54,6 +58,16 @@ def _fetch_page(session, csrf_token, page_number):
     resp = session.post(API_URL, json=payload, headers=api_headers, timeout=30)
     resp.raise_for_status()
     return resp.json()
+
+
+def _fetch_description(session, url):
+    try:
+        resp = session.get(url, headers=HEADERS, timeout=20)
+        resp.raise_for_status()
+        el = BeautifulSoup(resp.content, "html.parser").select_one("div.content")
+        return html_to_md(str(el)) if el else None
+    except Exception:
+        return None
 
 
 def _parse_deadline(s):
@@ -124,7 +138,7 @@ def scrape() -> list:
     session = requests.Session()
     csrf_token = _get_csrf_token(session)
 
-    all_jobs = []
+    stubs = []
     page = 0
 
     while True:
@@ -136,14 +150,17 @@ def scrape() -> list:
             break
 
         for item in results:
-            all_jobs.append(_parse_job(item))
+            stubs.append(_parse_job(item))
 
-        if len(all_jobs) >= total:
+        if len(stubs) >= total:
             break
 
         page += 1
 
-    return all_jobs
+    with ThreadPoolExecutor(max_workers=10) as ex:
+        futures = [(s, ex.submit(_fetch_description, session, s["url"])) for s in stubs]
+
+    return [{**stub, "description": fut.result()} for stub, fut in futures]
 
 
 if __name__ == "__main__":

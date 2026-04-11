@@ -3,6 +3,9 @@
 import re
 import requests
 from bs4 import BeautifulSoup
+from concurrent.futures import ThreadPoolExecutor
+
+from scrapers._utils import html_to_md
 
 AGENCY = "OPCW"
 AGENCY_NAME = "Organisation for the Prohibition of Chemical Weapons"
@@ -14,6 +17,21 @@ HEADERS = {
     "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
     "Accept-Language": "en-US,en;q=0.5",
 }
+
+
+def _fetch_description(session: requests.Session, job_url: str) -> str | None:
+    try:
+        resp = session.get(job_url, timeout=20)
+        resp.raise_for_status()
+        soup = BeautifulSoup(resp.text, "html.parser")
+        details = soup.find("div", class_="ts-offer-page__content-details")
+        if details:
+            span = details.find("span")
+            if span:
+                return html_to_md(str(span))
+    except Exception:
+        pass
+    return None
 
 
 def _extract_grade(job_title):
@@ -35,67 +53,49 @@ def _parse_deadline(deadline_str):
 
 def scrape() -> list[dict]:
     """Scrape jobs from OPCW careers portal."""
+    session = requests.Session()
+    session.headers.update(HEADERS)
     try:
-        response = requests.get(JOBS_URL, headers=HEADERS, timeout=30)
+        response = session.get(JOBS_URL, timeout=30)
         response.raise_for_status()
     except Exception:
         return []
 
     soup = BeautifulSoup(response.text, "html.parser")
 
-    jobs = []
+    stubs = []
 
-    # Find all job cards
-    job_cards = soup.find_all("div", class_="ts-offer-card")
-
-    for card in job_cards:
+    for card in soup.find_all("div", class_="ts-offer-card"):
         try:
-            # Extract job title and URL
             title_link = card.select_one("h3.ts-offer-card__title > a.ts-offer-card__title-link")
             if not title_link:
                 continue
 
             job_title = title_link.get_text(strip=True)
             href = title_link.get("href", "").strip()
-
             if not job_title or not href:
                 continue
 
-            # Build full job URL
-            if href.startswith("/"):
-                job_url = BASE_URL + href
-            else:
-                job_url = href
-
-            # Extract grade from job title
+            job_url = (BASE_URL + href) if href.startswith("/") else href
             grade = _extract_grade(job_title)
 
-            # Extract job metadata from content list
             content_list = card.select_one("div.ts-offer-card-content > ul.ts-offer-card-content__list")
-            list_items = []
-            if content_list:
-                list_items = [li.get_text(strip=True) for li in content_list.find_all("li")]
+            list_items = [li.get_text(strip=True) for li in content_list.find_all("li")] if content_list else []
+            deadline = _parse_deadline(list_items[1]) if len(list_items) > 1 else None
 
-            # Extract deadline from 2nd list item (index 1)
-            deadline = None
-            if len(list_items) > 1:
-                deadline = list_items[1]
-
-            jobs.append({
-                "agency": AGENCY,
-                "agency_name": AGENCY_NAME,
-                "job_title": job_title,
-                "grade": grade,
-                "city": "The Hague",
-                "country": "Netherlands",
-                "deadline": _parse_deadline(deadline),
-                "url": job_url,
+            stubs.append({
+                "agency": AGENCY, "agency_name": AGENCY_NAME,
+                "job_title": job_title, "grade": grade,
+                "city": "The Hague", "country": "Netherlands",
+                "deadline": deadline, "url": job_url,
             })
-
         except Exception:
             continue
 
-    return jobs
+    with ThreadPoolExecutor(max_workers=10) as ex:
+        futures = [(s, ex.submit(_fetch_description, session, s["url"])) for s in stubs]
+
+    return [{**stub, "description": fut.result()} for stub, fut in futures]
 
 
 if __name__ == "__main__":

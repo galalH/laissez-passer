@@ -3,6 +3,8 @@
 import requests
 from bs4 import BeautifulSoup
 
+from scrapers._utils import html_to_md
+
 AGENCY = "IFAD"
 AGENCY_NAME = "International Fund for Agricultural Development"
 JOBS_URL = "https://job.ifad.org/psc/IFHRPRDE/CAREERS/JOBS/c/HRS_HRAM_FL.HRS_CG_SEARCH_FL.GBL?Page=HRS_APP_SCHJOB_FL&Action=U"
@@ -162,23 +164,29 @@ def _parse_jobs(html):
     return jobs
 
 
-def _fetch_grades(session, icsid, state_num, count):
-    """Navigate to each job detail page and extract grade using Next button."""
+def _fetch_grades_and_descriptions(session, icsid, state_num, count):
+    """Navigate to each job detail page and extract grade and description."""
+    import re as _re
     grades = [None] * count
+    descriptions = [None] * count
     if count == 0:
-        return grades
+        return grades, descriptions
 
     soup_d, state_d = _post_action(session, icsid, "HRS_VIEW_DETAILSPB$0", state_num)
     for i in range(count):
         grade_el = soup_d.find(id="IFA_HRS_SCH_WRK_DESCR")
         grades[i] = grade_el.get_text(strip=True) if grade_el else None
 
+        # Collect all HRS_SCH_PSTDSC_DESCRLONG$N section texts
+        sections = soup_d.find_all(id=_re.compile(r'^HRS_SCH_PSTDSC_DESCRLONG\$\d+$'))
+        descriptions[i] = html_to_md("".join(str(s) for s in sections)) if sections else None
+
         if i < count - 1:
             soup_d, state_d = _post_action(
                 session, icsid, "DERIVED_HRS_FLU_HRS_NEXT_PB", state_d
             )
 
-    return grades
+    return grades, descriptions
 
 
 def scrape() -> list:
@@ -190,9 +198,10 @@ def scrape() -> list:
     listing_state = state_el["value"] if state_el else state_num
 
     jobs = _parse_jobs(html)
-    grades = _fetch_grades(session, icsid, listing_state, len(jobs))
-    for job, grade in zip(jobs, grades):
+    grades, descriptions = _fetch_grades_and_descriptions(session, icsid, listing_state, len(jobs))
+    for job, grade, description in zip(jobs, grades, descriptions):
         job["grade"] = grade or None
+        job["description"] = description
 
     return jobs
 

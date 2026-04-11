@@ -4,6 +4,9 @@ import requests
 from bs4 import BeautifulSoup
 import json
 from dateutil import parser as dateutil_parser
+from concurrent.futures import ThreadPoolExecutor
+
+from scrapers._utils import html_to_md
 
 AGENCY = "UNIDIR"
 AGENCY_NAME = "United Nations Institute for Disarmament Research"
@@ -56,9 +59,21 @@ def _split_location(s: str | None) -> tuple[str | None, str | None]:
     return city, country
 
 
-def scrape() -> list[dict]:
+def _fetch_description(session: requests.Session, url: str) -> str | None:
     try:
-        resp = requests.get(JOBS_URL, headers=HEADERS, timeout=30)
+        resp = session.get(url, headers=HEADERS, timeout=20)
+        resp.raise_for_status()
+        soup = BeautifulSoup(resp.content, "html.parser")
+        content = soup.find("div", class_="post-content")
+        return html_to_md(str(content)) if content else None
+    except Exception:
+        return None
+
+
+def scrape() -> list[dict]:
+    session = requests.Session()
+    try:
+        resp = session.get(JOBS_URL, headers=HEADERS, timeout=30)
         resp.raise_for_status()
     except Exception:
         return []
@@ -71,44 +86,45 @@ def scrape() -> list[dict]:
     if job_list_section.find("div", class_="job-list__empty"):
         return []
 
-    jobs = []
-    for item in job_list_section.find_all("div", class_="job-item"):
+    stubs = []
+    for item in job_list_section.find_all("li", class_="job-table__item"):
         try:
-            title_el = item.find("h3", class_="job-item__title")
+            a = item.find("a", class_="job-table__item-link")
+            if not a:
+                continue
+
+            title_el = item.find("span", class_="job-table__item-title")
             job_title = title_el.get_text(strip=True) if title_el else None
             if not job_title:
                 continue
 
-            location_el = item.find("span", class_="job-item__location")
+            location_el = item.find("span", class_="job-table__item-location")
             location = location_el.get_text(strip=True) if location_el else None
             city, country = _split_location(location)
 
-            deadline_el = item.find("span", class_="job-item__deadline")
-            deadline_raw = deadline_el.get_text(strip=True) if deadline_el else None
+            date_el = item.find("span", class_="job-table__item-date")
+            deadline_raw = date_el.get_text(strip=True) if date_el else None
+            if deadline_raw and deadline_raw.lower().startswith("until "):
+                deadline_raw = deadline_raw[6:]
             deadline = _parse_deadline(deadline_raw)
 
-            grade_el = item.find("span", class_="job-item__grade")
-            grade = grade_el.get_text(strip=True) if grade_el else None
-
-            link_el = item.find("a")
-            href = link_el.get("href") if link_el else None
-            if href and not href.startswith("http"):
+            href = a.get("href", "")
+            if not href.startswith("http"):
                 href = "https://unidir.org" + href
 
-            jobs.append({
-                "agency": AGENCY,
-                "agency_name": AGENCY_NAME,
-                "job_title": job_title,
-                "grade": grade,
-                "city": city,
-                "country": country,
-                "deadline": deadline,
-                "url": href or JOBS_URL,
+            stubs.append({
+                "agency": AGENCY, "agency_name": AGENCY_NAME,
+                "job_title": job_title, "grade": None,
+                "city": city, "country": country,
+                "deadline": deadline, "url": href,
             })
         except Exception:
             continue
 
-    return jobs
+    with ThreadPoolExecutor(max_workers=10) as ex:
+        futures = [(s, ex.submit(_fetch_description, session, s["url"])) for s in stubs]
+
+    return [{**stub, "description": fut.result()} for stub, fut in futures]
 
 
 if __name__ == "__main__":

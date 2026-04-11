@@ -1,10 +1,14 @@
 """UNFCCC (UN Framework Convention on Climate Change) Job Scraper."""
 
+import io
 import re
+import requests
 from datetime import datetime
+from concurrent.futures import ThreadPoolExecutor
 
 from bs4 import BeautifulSoup
 from playwright.sync_api import sync_playwright
+from pypdf import PdfReader
 
 AGENCY = "UNFCCC"
 AGENCY_NAME = "United Nations Framework Convention on Climate Change"
@@ -46,6 +50,32 @@ def _parse_deadline(date_range: str) -> str | None:
     return f"{year}-{month}-{day}"
 
 
+_HEADERS = {
+    "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+}
+
+
+def _fetch_description(cookies: dict, url: str) -> str | None:
+    """Download the job PDF (identified by URL path or Content-Type) and extract its text.
+    Each call creates its own session to avoid thread-safety issues. Cookies are applied
+    without domain restriction so they reach the file-storage host too.
+    """
+    try:
+        session = requests.Session()
+        session.headers.update(_HEADERS)
+        session.cookies.update(cookies)
+        resp = session.get(url, timeout=30)
+        resp.raise_for_status()
+        ct = resp.headers.get("Content-Type", "")
+        if "pdf" not in ct.lower() and ".pdf" not in url.split("?")[0].lower():
+            return None
+        reader = PdfReader(io.BytesIO(resp.content))
+        text = "\n".join(page.extract_text() or "" for page in reader.pages).strip()
+        return text or None
+    except Exception:
+        return None
+
+
 def scrape() -> list[dict]:
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
@@ -53,11 +83,17 @@ def scrape() -> list[dict]:
             page = browser.new_page()
             page.goto(JOBS_URL, wait_until="networkidle", timeout=60_000)
             html = page.content()
+            cookies = page.context.cookies()
         finally:
             browser.close()
 
+    # Extract cookies as a plain dict; passed to each worker thread which builds
+    # its own session (requests.Session is not thread-safe for concurrent use).
+    # No domain restriction so cookies also reach the CDN/file-storage host.
+    cookie_dict = {c["name"]: c["value"] for c in cookies}
+
     soup = BeautifulSoup(html, "html.parser")
-    jobs = []
+    stubs = []
 
     for table in soup.find_all("table"):
         heading = ""
@@ -91,18 +127,17 @@ def scrape() -> list[dict]:
 
             deadline = _parse_deadline(cells[3].get_text(strip=True))
 
-            jobs.append({
-                "agency": AGENCY,
-                "agency_name": AGENCY_NAME,
-                "job_title": job_title,
-                "grade": grade,
-                "city": "Bonn",
-                "country": "Germany",
-                "deadline": deadline,
-                "url": job_url,
+            stubs.append({
+                "agency": AGENCY, "agency_name": AGENCY_NAME,
+                "job_title": job_title, "grade": grade,
+                "city": "Bonn", "country": "Germany",
+                "deadline": deadline, "url": job_url,
             })
 
-    return jobs
+    with ThreadPoolExecutor(max_workers=10) as ex:
+        futures = [(s, ex.submit(_fetch_description, cookie_dict, s["url"])) for s in stubs]
+
+    return [{**stub, "description": fut.result()} for stub, fut in futures]
 
 
 if __name__ == "__main__":

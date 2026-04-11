@@ -3,6 +3,9 @@ from bs4 import BeautifulSoup
 import json
 import re
 from dateutil import parser as dateutil_parser
+from concurrent.futures import ThreadPoolExecutor
+
+from scrapers._utils import html_to_md
 
 AGENCY = "UNESCO"
 AGENCY_NAME = "United Nations Educational Scientific and Cultural Organization"
@@ -61,13 +64,26 @@ def _parse_location(location_str):
 BASE_URL = "https://careers.unesco.org"
 PAGE_SIZE = 25
 
+_HEADERS = {
+    "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+}
+
+
+def _fetch_description(session, job_url: str) -> str | None:
+    try:
+        resp = session.get(job_url, timeout=20)
+        resp.raise_for_status()
+        el = BeautifulSoup(resp.text, "html.parser").find(class_="jobdescription")
+        return html_to_md(str(el)) if el else None
+    except Exception:
+        return None
+
 
 def scrape() -> list[dict]:
-    jobs = []
+    stubs = []
     offset = 0
-    headers = {
-        "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-    }
+    session = requests.Session()
+    session.headers.update(_HEADERS)
 
     while True:
         if offset == 0:
@@ -76,7 +92,7 @@ def scrape() -> list[dict]:
             url = f"{BASE_URL}/go/All-jobs-openings/784002/{offset}/"
 
         try:
-            response = requests.get(url, headers=headers, timeout=30)
+            response = session.get(url, timeout=30)
             response.raise_for_status()
         except Exception:
             break
@@ -112,22 +128,17 @@ def scrape() -> list[dict]:
                 deadline_raw = deadline_el.get_text(strip=True) if deadline_el else None
                 deadline = _parse_deadline(deadline_raw)
 
-                jobs.append({
-                    "agency": AGENCY,
-                    "agency_name": AGENCY_NAME,
-                    "job_title": job_title,
-                    "grade": grade or None,
-                    "city": city,
-                    "country": country,
-                    "deadline": deadline,
-                    "url": job_url,
+                stubs.append({
+                    "agency": AGENCY, "agency_name": AGENCY_NAME,
+                    "job_title": job_title, "grade": grade or None,
+                    "city": city, "country": country,
+                    "deadline": deadline, "url": job_url,
                 })
             except Exception:
                 continue
 
         table_label = table.get("aria-label", "")
         try:
-            # e.g. "Search results for . Page 1 of 3, Results 1 to 25 of 61"
             total = int(table_label.split("of")[-1].strip())
         except Exception:
             break
@@ -136,6 +147,12 @@ def scrape() -> list[dict]:
         if offset >= total:
             break
 
+    with ThreadPoolExecutor(max_workers=10) as ex:
+        futures = [(s, ex.submit(_fetch_description, session, s["url"])) for s in stubs]
+
+    jobs = []
+    for stub, fut in futures:
+        jobs.append({**stub, "description": fut.result()})
     return jobs
 
 

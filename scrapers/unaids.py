@@ -11,6 +11,10 @@ Each endpoint returns XML with job listings that are parsed and deduplicated.
 import requests
 import xml.etree.ElementTree as ET
 from typing import Optional
+from bs4 import BeautifulSoup
+from concurrent.futures import ThreadPoolExecutor
+
+from scrapers._utils import html_to_md
 
 AGENCY = "UNAIDS"
 AGENCY_NAME = "Joint United Nations Programme on HIV/AIDS"
@@ -27,6 +31,20 @@ JOB_DETAIL_URL_TEMPLATE = "https://erecruit.unaids.org/public/hrd-cl-vac-view.as
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
 }
+
+
+def _fetch_description(session: requests.Session, job_url: str) -> str | None:
+    try:
+        resp = session.get(job_url, timeout=30)
+        resp.raise_for_status()
+        soup = BeautifulSoup(resp.content, "html.parser")
+        tds = [td for td in soup.find_all("td") if len(td.get_text(strip=True)) > 200]
+        if not tds:
+            return None
+        best = max(tds, key=lambda td: len(td.get_text(strip=True)))
+        return html_to_md(str(best))
+    except Exception:
+        return None
 
 
 def parse_closing_date(closing_date_str: Optional[str]) -> Optional[str]:
@@ -164,7 +182,6 @@ def parse_job_from_xml(job_element) -> Optional[dict]:
             "grade": grade,
             "city": city,
             "country": country,
-
             "deadline": deadline,
             "url": job_url,
         }
@@ -174,27 +191,20 @@ def parse_job_from_xml(job_element) -> Optional[dict]:
 
 
 def scrape() -> list[dict]:
-    """
-    Scrapes UNAIDS job listings from all three XML endpoints.
-    Returns a list of job dictionaries, deduplicated by jobinfo_uid_c.
-
-    Structure: root > JobPositionPosting > JobPositionInformation
-    """
-    jobs = []
+    """Scrapes UNAIDS job listings from all three XML endpoints."""
+    stubs = []
     seen_uids = set()
+    session = requests.Session()
+    session.headers.update(HEADERS)
 
     for endpoint_url in ENDPOINTS:
         try:
-            response = requests.get(endpoint_url, headers=HEADERS, timeout=30)
+            response = session.get(endpoint_url, timeout=30)
             response.raise_for_status()
 
-            # Parse XML
             root = ET.fromstring(response.content)
 
-            # Find all JobPositionPosting elements (the primary structure)
             job_elements = root.findall("JobPositionPosting")
-
-            # If no "JobPositionPosting" elements found, try alternative tag names
             if not job_elements:
                 job_elements = root.findall("job")
             if not job_elements:
@@ -202,51 +212,36 @@ def scrape() -> list[dict]:
             if not job_elements:
                 job_elements = root.findall("vacancy")
             if not job_elements:
-                # Try direct iteration over all children
                 job_elements = list(root)
 
             for job_element in job_elements:
-                # Skip non-job elements and root element
                 if job_element.tag in ["root"]:
                     continue
 
                 parsed_job = parse_job_from_xml(job_element)
+                if not parsed_job:
+                    continue
 
-                if parsed_job:
-                    # Extract UID for deduplication
-                    info_element = job_element.find("JobPositionInformation")
-                    if info_element is None:
-                        info_element = job_element
+                info_element = job_element.find("JobPositionInformation") or job_element
+                uid_elem = (info_element.find("JobPositionPostingId")
+                            or info_element.find("jobinfo_uid_c")
+                            or info_element.find("uid")
+                            or info_element.find("id"))
+                uid = uid_elem.text if uid_elem is not None else None
 
-                    uid_elem = info_element.find("JobPositionPostingId")
-                    if uid_elem is None:
-                        uid_elem = info_element.find("jobinfo_uid_c")
-                    if uid_elem is None:
-                        uid_elem = info_element.find("uid")
-                    if uid_elem is None:
-                        uid_elem = info_element.find("id")
+                if uid and uid in seen_uids:
+                    continue
+                if uid:
+                    seen_uids.add(uid)
+                stubs.append(parsed_job)
 
-                    uid = uid_elem.text if uid_elem is not None else None
-
-                    # Deduplicate by UID
-                    if uid and uid not in seen_uids:
-                        seen_uids.add(uid)
-                        jobs.append(parsed_job)
-                    elif not uid:
-                        # If no UID, add it anyway (no way to deduplicate)
-                        jobs.append(parsed_job)
-
-        except requests.RequestException:
-            # Continue to next endpoint on network errors
-            continue
-        except ET.ParseError:
-            # Continue to next endpoint on XML parse errors
-            continue
-        except Exception:
-            # Continue to next endpoint on other errors
+        except (requests.RequestException, ET.ParseError, Exception):
             continue
 
-    return jobs
+    with ThreadPoolExecutor(max_workers=10) as ex:
+        futures = [(s, ex.submit(_fetch_description, session, s["url"])) for s in stubs]
+
+    return [{**stub, "description": fut.result()} for stub, fut in futures]
 
 
 if __name__ == "__main__":

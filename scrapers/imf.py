@@ -4,6 +4,9 @@ import re
 import requests
 import json
 from bs4 import BeautifulSoup
+from concurrent.futures import ThreadPoolExecutor
+
+from scrapers._utils import html_to_md
 
 AGENCY = "IMF"
 AGENCY_NAME = "International Monetary Fund"
@@ -19,53 +22,45 @@ HEADERS = {
 
 
 def _split_location(location_str):
-    """Split IMF locationsText into (city, country).
-
-    Format is 'Country, City' (e.g. 'USA, Washington DC') or just 'Country'.
-    Strip 'LTX-' prefixes used for some country codes.
-    """
     if not location_str:
         return None, None
     s = re.sub(r'^LTX-', '', location_str.strip())
     if "," not in s:
         return None, s
     idx = s.index(",")
-    country = s[:idx].strip()
-    city = s[idx + 1:].strip()
-    return city, country
+    return s[idx + 1:].strip(), s[:idx].strip()
 
 
 def _parse_deadline(bullet_fields):
-    """Extract deadline date from bulletFields list (MM/DD/YYYY -> YYYY-MM-DD)."""
     for field in bullet_fields:
         m = re.search(r'(\d{2})/(\d{2})/(\d{4})', field)
         if m:
-            month, day, year = m.group(1), m.group(2), m.group(3)
-            return f"{year}-{month}-{day}"
+            return f"{m.group(3)}-{m.group(1)}-{m.group(2)}"
     return None
 
 
-def _fetch_grade(session, external_path):
-    """Fetch job detail page and extract 'Hiring For' grade(s)."""
+def _fetch_detail(session, external_path):
     try:
         url = f"https://imf.wd5.myworkdayjobs.com/wday/cxs/imf/IMF{external_path}"
         data = session.get(url, headers=HEADERS, timeout=30).json()
-        desc = data.get("jobPostingInfo", {}).get("jobDescription", "")
-        text = BeautifulSoup(desc, "html.parser").get_text(separator="\n", strip=True)
-        m = re.search(r'Hiring For[:\s]*\n(.+)', text)
+        desc_html = data.get("jobPostingInfo", {}).get("jobDescription", "")
+        # Plain text needed for grade regex; markdown used for description
+        plain = BeautifulSoup(desc_html, "html.parser").get_text(separator="\n", strip=True)
+        description = html_to_md(desc_html) or plain or None
+        m = re.search(r'Hiring For[:\s]*\n(.+)', plain)
         if not m:
-            return None
+            return None, description
         grade = m.group(1).strip()
         if "," in grade:
             grade = grade.split(",")[-1].strip()
-        return grade
+        return grade, description
     except Exception:
-        return None
+        return None, None
 
 
 def scrape() -> list[dict]:
     session = requests.Session()
-    jobs = []
+    stubs = []
     offset = 0
     limit = 20
 
@@ -90,26 +85,27 @@ def scrape() -> list[dict]:
                 url = f"https://imf.wd5.myworkdayjobs.com/en-US/IMF/details/{job_slug}"
                 city, country = _split_location(location_str)
                 deadline = _parse_deadline(job.get("bulletFields", []))
-                grade = _fetch_grade(session, external_path)
-                jobs.append({
-                    "agency": AGENCY,
-                    "agency_name": AGENCY_NAME,
-                    "job_title": title,
-                    "grade": grade,
-                    "city": city,
-                    "country": country,
-                    "deadline": deadline,
-                    "url": url,
+                stubs.append({
+                    "_path": external_path,
+                    "agency": AGENCY, "agency_name": AGENCY_NAME,
+                    "job_title": title, "city": city, "country": country,
+                    "deadline": deadline, "url": url,
                 })
 
             total = data.get("total", 0)
             if offset + limit >= total:
                 break
             offset += limit
-
         except Exception:
             break
 
+    with ThreadPoolExecutor(max_workers=10) as ex:
+        futures = [(s, ex.submit(_fetch_detail, session, s.pop("_path"))) for s in stubs]
+
+    jobs = []
+    for stub, fut in futures:
+        grade, description = fut.result()
+        jobs.append({**stub, "grade": grade, "description": description})
     return jobs
 
 

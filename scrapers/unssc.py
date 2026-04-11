@@ -1,8 +1,11 @@
 """UNSSC Job Scraper - scrapes UNSSC employment opportunities from Drupal CMS."""
 
+import io
 import requests
 import re
 from bs4 import BeautifulSoup
+from pypdf import PdfReader
+from concurrent.futures import ThreadPoolExecutor
 
 AGENCY = "UNSSC"
 AGENCY_NAME = "United Nations System Staff College"
@@ -52,12 +55,27 @@ def extract_grade(title: str) -> str | None:
     return None
 
 
+def _fetch_description(session: requests.Session, job_url: str) -> str | None:
+    """Download a PDF job posting and extract its text."""
+    if not job_url.lower().endswith(".pdf"):
+        return None
+    try:
+        resp = session.get(job_url, headers=HEADERS, timeout=30)
+        resp.raise_for_status()
+        reader = PdfReader(io.BytesIO(resp.content))
+        text = "\n".join(page.extract_text() or "" for page in reader.pages).strip()
+        return text or None
+    except Exception:
+        return None
+
+
 def scrape() -> list[dict]:
     """Scrape job openings from UNSSC employment opportunities page."""
-    jobs = []
+    stubs = []
+    session = requests.Session()
 
     try:
-        response = requests.get(JOBS_URL, headers=HEADERS, timeout=30)
+        response = session.get(JOBS_URL, headers=HEADERS, timeout=30)
         response.raise_for_status()
     except Exception:
         return []
@@ -125,19 +143,17 @@ def scrape() -> list[dict]:
         city = "Turin"
         country = "Italy"
 
-        jobs.append({
-            "agency": AGENCY,
-            "agency_name": AGENCY_NAME,
-            "job_title": job_title,
-            "grade": grade,
-            "city": city,
-            "country": country,
-
-            "deadline": parsed_deadline,
-            "url": url,
+        stubs.append({
+            "agency": AGENCY, "agency_name": AGENCY_NAME,
+            "job_title": job_title, "grade": grade,
+            "city": city, "country": country,
+            "deadline": parsed_deadline, "url": url,
         })
 
-    return jobs
+    with ThreadPoolExecutor(max_workers=10) as ex:
+        futures = [(s, ex.submit(_fetch_description, session, s["url"])) for s in stubs]
+
+    return [{**stub, "description": fut.result()} for stub, fut in futures]
 
 
 if __name__ == "__main__":
