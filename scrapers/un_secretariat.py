@@ -132,9 +132,7 @@ def scrape() -> list[dict]:
 
             desc_html = item.get("jobDescription") or ""
             description = html_to_md(desc_html)
-            description = trim(description, after="No Fee\n\nTHE UNITED NATIONS DOES NOT CHARGE A FEE")
-            if agency_abbr == "ICJ":
-                description = trim(description, after="United Nations Considerations\n\nIn accordance with the ICJ")
+            description = trim(description, after="Special Notice")
 
             all_jobs.append({
                 "agency": agency_abbr,
