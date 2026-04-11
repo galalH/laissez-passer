@@ -6,7 +6,7 @@ import re
 from urllib.parse import quote, unquote
 from concurrent.futures import ThreadPoolExecutor
 
-from scrapers._utils import html_to_md
+from scrapers._utils import html_to_md, trim
 
 AGENCY = "IAEA"
 AGENCY_NAME = "International Atomic Energy Agency"
@@ -101,6 +101,7 @@ def fetch_detail(session: requests.Session, job_url: str) -> tuple[str | None, s
                             description = text
                             break
 
+        description = trim(description, after="ftlUtil_loadLiWidget")
         return deadline, description
     except Exception:
         return None, None

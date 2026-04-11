@@ -4,7 +4,7 @@ import requests
 from urllib.parse import unquote
 from concurrent.futures import ThreadPoolExecutor
 
-from scrapers._utils import html_to_md
+from scrapers._utils import html_to_md, trim
 
 AGENCY = "FAO"
 AGENCY_NAME = "Food and Agriculture Organization"
@@ -105,6 +105,7 @@ def fetch_detail(session: requests.Session, job_url: str) -> tuple[str | None, s
             decoded = unquote(best.replace('%5C:', ':'))
             description = html_to_md(decoded)
 
+        description = trim(description, after="**ADDITIONAL INFORMATION**")
         return grade, description
     except Exception:
         return None, None

@@ -6,7 +6,7 @@ import re
 from bs4 import BeautifulSoup
 from concurrent.futures import ThreadPoolExecutor
 
-from scrapers._utils import html_to_md
+from scrapers._utils import html_to_md, trim
 
 AGENCY = "World Bank"
 AGENCY_NAME = "World Bank Group"
@@ -67,7 +67,7 @@ def _fetch_detail(session, req_id):
         ad_soup = BeautifulSoup(ad, "html.parser")
         for t in ad_soup.find_all("table"):
             t.decompose()
-        description = html_to_md(str(ad_soup)) or None
+        description = trim(html_to_md(str(ad_soup)) or None, after="WBG Culture Attributes:")
 
         return grade, city, country, deadline, description
     except Exception:

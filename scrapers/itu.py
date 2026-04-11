@@ -6,7 +6,7 @@ import re
 from dateutil import parser as dateutil_parser
 from concurrent.futures import ThreadPoolExecutor
 
-from scrapers._utils import html_to_md
+from scrapers._utils import html_to_md, trim
 
 AGENCY = "ITU"
 AGENCY_NAME = "International Telecommunication Union"
@@ -77,6 +77,10 @@ def _get_job_details(job_url, session):
 
         desc_el = soup.find(class_="jobdescription")
         description = html_to_md(str(desc_el)) if desc_el else None
+        # Strip agency preamble — try English sentinel first, then French
+        description = trim(description, before="Achieving gender balance is a high priority for ITU.\n\n")
+        if description:
+            description = trim(description, before="UNION INTERNATIONALE DES TÉLÉCOMMUNICATIONS\n\n")
 
         return grade, deadline, description
     except Exception:

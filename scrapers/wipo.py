@@ -6,7 +6,7 @@ import json
 from urllib.parse import unquote
 from concurrent.futures import ThreadPoolExecutor
 
-from scrapers._utils import html_to_md
+from scrapers._utils import html_to_md, trim
 
 AGENCY = "WIPO"
 AGENCY_NAME = "World Intellectual Property Organization"
@@ -40,7 +40,10 @@ def fetch_detail(session: requests.Session, job_url: str) -> str | None:
         if encoded_blocks:
             best = max(encoded_blocks, key=len)
             decoded = unquote(best.replace('%5C:', ':'))
-            return html_to_md(decoded)
+            return trim(
+                html_to_md(decoded),
+                after="Applications from qualified women as well as from qualified nationals of unrepresented Member States of WIPO",
+            )
     except Exception:
         pass
     return None

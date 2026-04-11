@@ -6,7 +6,7 @@ import json
 from urllib.parse import unquote
 from concurrent.futures import ThreadPoolExecutor
 
-from scrapers._utils import html_to_md
+from scrapers._utils import html_to_md, trim
 
 AGENCY = "WHO"
 AGENCY_NAME = "World Health Organization"
@@ -62,7 +62,13 @@ def fetch_detail(session: requests.Session, job_url: str) -> str | None:
         if encoded_blocks:
             best = max(encoded_blocks, key=len)
             decoded = unquote(best.replace('%5C:', ':'))
-            return html_to_md(decoded)
+            description = html_to_md(decoded)
+            if description:
+                description = re.split(
+                    r'\n+[#*\s]*additional\s+information',
+                    description, maxsplit=1, flags=re.IGNORECASE
+                )[0].strip() or None
+            return description
     except Exception:
         pass
     return None

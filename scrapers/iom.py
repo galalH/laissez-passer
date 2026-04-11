@@ -61,6 +61,8 @@ def _fetch_detail(session, job_id):
         deadline = end_date[:10] if end_date else None
         parts = [html_to_md(item.get(f) or "") or "" for f in _DESC_FIELDS]
         description = "\n\n".join(p for p in parts if p) or None
+        if description:
+            description = description.replace('\u200b', '').strip() or None
         return grade, deadline, description
     except Exception:
         return None, None, None

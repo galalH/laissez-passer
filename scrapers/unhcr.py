@@ -4,7 +4,7 @@ import requests
 import json
 from concurrent.futures import ThreadPoolExecutor
 
-from scrapers._utils import html_to_md
+from scrapers._utils import html_to_md, trim
 
 AGENCY = "UNHCR"
 AGENCY_NAME = "United Nations High Commissioner for Refugees"
@@ -37,6 +37,12 @@ def _fetch_detail(external_path):
         end_date = info.get("endDate")
         deadline = end_date[:10] if end_date else None
         description = html_to_md(info.get("jobDescription") or "")
+        if description:
+            if 'Terms of Reference' in description:
+                description = description.split('Terms of Reference', 1)[1].strip() or None
+            elif 'Standard Job Description' in description:
+                description = description.split('Standard Job Description', 1)[1].strip() or None
+        description = trim(description, after="UNHCR Salary Calculator")
         return deadline, description
     except Exception:
         return None, None

@@ -8,6 +8,7 @@ API endpoints provide XML feeds for:
 Each endpoint returns XML with job listings that are parsed and deduplicated.
 """
 
+import re
 import requests
 import xml.etree.ElementTree as ET
 from typing import Optional
@@ -15,6 +16,22 @@ from bs4 import BeautifulSoup
 from concurrent.futures import ThreadPoolExecutor
 
 from scrapers._utils import html_to_md
+
+
+def _strip_table_markup(text: str) -> str | None:
+    """Remove markdown table formatting, returning plain text."""
+    lines = text.split('\n')
+    result = []
+    for line in lines:
+        # Drop separator rows (| --- | --- | ...)
+        if re.match(r'^\s*\|[\s|\-]+\|\s*$', line):
+            continue
+        # Strip leading/trailing pipe-and-space from content lines
+        stripped = re.sub(r'^\s*\|\s*', '', line)
+        stripped = re.sub(r'\s*\|\s*$', '', stripped).strip()
+        if stripped:
+            result.append(stripped)
+    return '\n'.join(result).strip() or None
 
 AGENCY = "UNAIDS"
 AGENCY_NAME = "Joint United Nations Programme on HIV/AIDS"
@@ -42,7 +59,10 @@ def _fetch_description(session: requests.Session, job_url: str) -> str | None:
         if not tds:
             return None
         best = max(tds, key=lambda td: len(td.get_text(strip=True)))
-        return html_to_md(str(best))
+        description = html_to_md(str(best))
+        if description:
+            description = _strip_table_markup(description)
+        return description
     except Exception:
         return None
 

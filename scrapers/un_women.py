@@ -4,7 +4,7 @@ import re
 import requests
 from concurrent.futures import ThreadPoolExecutor
 
-from scrapers._utils import html_to_md
+from scrapers._utils import html_to_md, trim
 
 AGENCY = "UN Women"
 AGENCY_NAME = "United Nations Entity for Gender Equality and the Empowerment of Women"
@@ -66,6 +66,18 @@ def _fetch_detail(session, job_id):
         deadline = end_date[:10] if end_date else None
         parts = [html_to_md(item.get(f) or "") or "" for f in _DESC_FIELDS]
         description = "\n\n".join(p for p in parts if p) or None
+        # Remove opening boilerplate paragraph containing the mission statement
+        _MARKER = "grounded in the vision of equality"
+        if description and _MARKER in description:
+            paragraphs = description.split('\n\n')
+            paragraphs = [p for p in paragraphs if _MARKER not in p]
+            description = '\n\n'.join(paragraphs).strip() or None
+        # Strip footer — whichever sentinel appears first
+        if description:
+            for _sentinel in ("At UN Women, we are committed", "Statements:"):
+                if _sentinel in description:
+                    description = trim(description, after=_sentinel)
+                    break
         return grade, deadline, description
     except Exception:
         return None, None, None

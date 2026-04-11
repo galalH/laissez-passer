@@ -5,7 +5,7 @@ import json
 import re
 from concurrent.futures import ThreadPoolExecutor
 
-from scrapers._utils import html_to_md
+from scrapers._utils import html_to_md, trim
 
 AGENCY = "WTO"
 AGENCY_NAME = "World Trade Organization"
@@ -26,7 +26,13 @@ def _fetch_detail(session, external_path):
         detail = session.get(f"{DETAIL_BASE}{external_path}", headers=HEADERS, timeout=30)
         detail.raise_for_status()
         desc_html = detail.json().get("jobPostingInfo", {}).get("jobDescription", "")
-        return html_to_md(desc_html)
+        description = html_to_md(desc_html)
+        _PREAMBLE_END = "are particularly encouraged for all positions.\n\n"
+        if description and _PREAMBLE_END in description:
+            description = description.split(_PREAMBLE_END, 1)[1]
+            if description.startswith(".\n"):
+                description = description.lstrip(".\n").strip() or None
+        return description
     except Exception:
         return None
 

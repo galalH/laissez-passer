@@ -4,7 +4,7 @@ import requests
 import json
 from concurrent.futures import ThreadPoolExecutor
 
-from scrapers._utils import html_to_md
+from scrapers._utils import html_to_md, trim
 
 AGENCY = "WFP"
 AGENCY_NAME = "World Food Programme"
@@ -38,6 +38,11 @@ def _fetch_detail(session, external_path):
         end_date = info.get("endDate")
         deadline = end_date[:10] if end_date else None
         description = html_to_md(info.get("jobDescription", ""))
+        description = trim(
+            description,
+            before="Terms and Conditions** section of this vacancy announcement).\n\n",
+            after="**WFP LEADERSHIP FRAMEWORK**",
+        )
         return deadline, description
     except Exception:
         return None, None

@@ -5,7 +5,7 @@ import requests
 import xml.etree.ElementTree as ET
 from dateutil import parser as dateutil_parser
 
-from scrapers._utils import html_to_md
+from scrapers._utils import html_to_md, trim
 
 AGENCY = "UNICEF"
 AGENCY_NAME = "United Nations Children's Fund"
@@ -72,6 +72,17 @@ def scrape() -> list[dict]:
 
         html_desc = item.findtext(f"{{{JOB_NS}}}description") or ""
         description = html_to_md(html_desc)
+        # Strip multilingual boilerplate preambles and footers
+        description = trim(description,
+            before="to learn more about what we do at UNICEF.\n",
+            after="UNICEF will not ask for applicants' bank account information")
+        if description:
+            # French variant
+            description = trim(description,
+                before="pour en savoir plus sur nos actions à l'UNICEF.\n")
+            # Spanish variant
+            description = trim(description,
+                before="¡Y nunca nos rendimos!\n\n")
 
         jobs.append({
             "agency": AGENCY,

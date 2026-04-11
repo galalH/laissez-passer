@@ -7,7 +7,7 @@ import json
 from urllib.parse import urljoin
 from concurrent.futures import ThreadPoolExecutor
 
-from scrapers._utils import html_to_md
+from scrapers._utils import html_to_md, trim
 
 AGENCY = "UNOPS"
 AGENCY_NAME = "United Nations Office for Project Services"
@@ -53,6 +53,7 @@ def _fetch_detail(url, session):
 
         sections = soup.find_all("div", id=re.compile(r"^section\d+__content$"))
         description = html_to_md("".join(str(s) for s in sections if s.get_text(strip=True))) or None
+        description = trim(description, after="Please note that UNOPS does not accept unsolicited resumes.")
 
         return grade, description
     except Exception:
