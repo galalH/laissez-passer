@@ -6,7 +6,7 @@ import requests
 from bs4 import BeautifulSoup
 from concurrent.futures import ThreadPoolExecutor
 
-from scrapers._utils import html_to_md
+from scrapers._utils import html_to_md, trim
 
 AGENCY = "CTBTO"
 AGENCY_NAME = "Preparatory Commission for the Comprehensive Nuclear-Test-Ban Treaty Organization"
@@ -74,23 +74,15 @@ def fetch_detail(session: requests.Session, job_id: int) -> tuple[str | None, st
 
         soup = BeautifulSoup(html, "html.parser")
 
-        # Find the <p> containing "Organizational Background" and collect
+        # Find the <p> containing "Organizational Setting" and collect
         # all following siblings up to (not including) "Additional Information"
-        description = None
-        org_p = None
-        for strong in soup.find_all("strong"):
-            if re.search(r"Organizational\s+Background", strong.get_text(), re.IGNORECASE):
-                org_p = strong.find_parent("p")
-                break
-        if org_p:
-            content = [str(org_p)]
-            for sib in org_p.next_siblings:
-                if hasattr(sib, "get_text") and re.search(
-                    r"Additional\s+Information", sib.get_text(), re.IGNORECASE
-                ):
-                    break
-                content.append(str(sib))
-            description = html_to_md("".join(content)) or None
+        posting = soup.find("div", class_="externalPosting")
+        description = html_to_md(str(posting)) if posting else None
+        description = trim(
+            description,
+            start=re.compile(r"\*{0,2}organizational\s+setting", re.IGNORECASE),
+            after=re.compile(r"\n+[#*\s]*additional\s+information", re.IGNORECASE),
+        )
 
         return grade, deadline, description
     except Exception:

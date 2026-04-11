@@ -63,11 +63,7 @@ def fetch_detail(session: requests.Session, job_url: str) -> str | None:
             best = max(encoded_blocks, key=len)
             decoded = unquote(best.replace('%5C:', ':'))
             description = html_to_md(decoded)
-            if description:
-                description = re.split(
-                    r'\n+[#*\s]*additional\s+information',
-                    description, maxsplit=1, flags=re.IGNORECASE
-                )[0].strip() or None
+            description = trim(description, after=re.compile(r"\n+[#*\s]*additional\s+information", re.IGNORECASE))
             return description
     except Exception:
         pass

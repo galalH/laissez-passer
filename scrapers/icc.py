@@ -7,7 +7,7 @@ import country_converter as coco
 from bs4 import BeautifulSoup
 from concurrent.futures import ThreadPoolExecutor
 
-from scrapers._utils import html_to_md
+from scrapers._utils import html_to_md, trim
 
 AGENCY = "ICC"
 AGENCY_NAME = "International Criminal Court"
@@ -130,6 +130,11 @@ def _fetch_job(session: requests.Session, job_id: int) -> dict | None:
             elements = [c for c in posting.children if getattr(c, 'name', None)]
             content_html = ''.join(str(c) for c in elements[3:])
             description = html_to_md(content_html) if content_html else None
+            description = trim(
+                description,
+                start=["**Organisational Context**", "**Organizational Context**"],
+                after="**General Information**",
+            )
 
         return {
             "agency": AGENCY,

@@ -61,13 +61,9 @@ def _fetch_detail(session, job_id):
         description = "\n\n".join(p for p in parts if p) or None
         description = trim(
             description,
-            before="ICAO Core Values: Integrity, Professionalism, Respect for Diversity.**\n\n",
+            start=["**THE ORGANIZATIONAL SETTING**", "The Organizational Setting"],
+            after=["**CONDITIONS OF EMPLOYMENT", "CONDITIONS OF EMPLOYMENT", "**NOTICE TO CANDIDATES**", "Notice to Candidates", "**No Fee**"],
         )
-        # Strip no-fee / fraud-warning footer (appears as "NOTICE TO CANDIDATES" or "No Fee" table)
-        for _footer in ("**NOTICE TO CANDIDATES**", "Notice to Candidates", "**No Fee**"):
-            if description and _footer in description:
-                description = trim(description, after=_footer)
-                break
         return grade, deadline, description
     except Exception:
         return None, None, None

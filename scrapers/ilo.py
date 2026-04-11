@@ -5,7 +5,7 @@ import requests
 from bs4 import BeautifulSoup
 from concurrent.futures import ThreadPoolExecutor
 
-from scrapers._utils import html_to_md
+from scrapers._utils import html_to_md, trim
 
 AGENCY = "ILO"
 AGENCY_NAME = "International Labour Organization"
@@ -65,7 +65,12 @@ def _fetch_description(session, url):
         resp = session.get(url, headers=HEADERS, timeout=20)
         resp.raise_for_status()
         el = BeautifulSoup(resp.content, "html.parser").select_one("div.content")
-        return html_to_md(str(el)) if el else None
+        description = html_to_md(str(el)) if el else None
+        return trim(
+            description,
+            start=re.compile(r"[#* ]*introduction\b", re.IGNORECASE),
+            after=re.compile(r"\*{0,2}recruitment\s+process", re.IGNORECASE),
+        )
     except Exception:
         return None
 

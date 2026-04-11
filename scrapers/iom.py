@@ -4,7 +4,7 @@ import requests
 import json
 from concurrent.futures import ThreadPoolExecutor
 
-from scrapers._utils import html_to_md
+from scrapers._utils import html_to_md, trim
 
 AGENCY = "IOM"
 AGENCY_NAME = "International Organization for Migration"
@@ -63,6 +63,7 @@ def _fetch_detail(session, job_id):
         description = "\n\n".join(p for p in parts if p) or None
         if description:
             description = description.replace('\u200b', '').strip() or None
+        description = trim(description, after="**Notes**")
         return grade, deadline, description
     except Exception:
         return None, None, None

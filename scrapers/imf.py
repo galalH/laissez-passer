@@ -6,7 +6,7 @@ import json
 from bs4 import BeautifulSoup
 from concurrent.futures import ThreadPoolExecutor
 
-from scrapers._utils import html_to_md
+from scrapers._utils import html_to_md, trim
 
 AGENCY = "IMF"
 AGENCY_NAME = "International Monetary Fund"
@@ -46,7 +46,11 @@ def _fetch_detail(session, external_path):
         desc_html = data.get("jobPostingInfo", {}).get("jobDescription", "")
         # Plain text needed for grade regex; markdown used for description
         plain = BeautifulSoup(desc_html, "html.parser").get_text(separator="\n", strip=True)
-        description = html_to_md(desc_html) or plain or None
+        description = trim(
+            html_to_md(desc_html) or plain or None,
+            before="Work for the IMF. Work for the World.",
+            after="*The IMF is guided by the principle that",
+        )
         m = re.search(r'Hiring For[:\s]*\n(.+)', plain)
         if not m:
             return None, description

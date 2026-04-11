@@ -44,22 +44,22 @@ def _normalize_grade(grade):
 
 
 _DESCRIPTION_FIELDS = (
-    "purposeforthepost",
-    "maindutiesandresponsibilities",
-    "requiredcompetencies",
-    "professionalexperience",
-    "education",
-    "languageskills",
-    "otherskills",
+    ("purposeforthepost",           "Purpose of the Post"),
+    ("maindutiesandresponsibilities","Main Duties and Responsibilities"),
+    ("requiredcompetencies",        "Required Competencies"),
+    ("professionalexperience",      "Professional Experience"),
+    ("education",                   "Education"),
+    ("languageskills",              "Language Skills"),
+    ("otherskills",                 "Other Skills"),
 )
 
 
 def _parse_description(job: dict) -> str | None:
     parts = []
-    for field in _DESCRIPTION_FIELDS:
+    for field, label in _DESCRIPTION_FIELDS:
         md = html_to_md(job.get(field) or "")
         if md:
-            parts.append(md)
+            parts.append(f"**{label}**\n\n{md}")
     return "\n\n".join(parts) or None
 
 

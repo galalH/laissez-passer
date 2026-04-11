@@ -3,7 +3,7 @@
 import requests
 from bs4 import BeautifulSoup
 
-from scrapers._utils import html_to_md
+from scrapers._utils import html_to_md, trim
 
 AGENCY = "IFAD"
 AGENCY_NAME = "International Fund for Agricultural Development"
@@ -177,9 +177,18 @@ def _fetch_grades_and_descriptions(session, icsid, state_num, count):
         grade_el = soup_d.find(id="IFA_HRS_SCH_WRK_DESCR")
         grades[i] = grade_el.get_text(strip=True) if grade_el else None
 
-        # Collect all HRS_SCH_PSTDSC_DESCRLONG$N section texts
-        sections = soup_d.find_all(id=_re.compile(r'^HRS_SCH_PSTDSC_DESCRLONG\$\d+$'))
-        descriptions[i] = html_to_md("".join(str(s) for s in sections)) if sections else None
+        # Build description from labeled sections (label → bold heading + content)
+        parts = []
+        for lbl_el in soup_d.find_all(id=_re.compile(r'^HRS_SCH_WRK_DESCR100\$\d+lbl$')):
+            n = _re.search(r'\$(\d+)lbl$', lbl_el['id']).group(1)
+            label = lbl_el.get_text(strip=True)
+            content_el = soup_d.find(id=f'HRS_SCH_PSTDSC_DESCRLONG${n}')
+            content = html_to_md(str(content_el)) if content_el else None
+            if content:
+                parts.append(f'**{label}**\n\n{content}')
+        description = '\n\n'.join(parts) or None
+        description = trim(description, after="**Other Information**")
+        descriptions[i] = description
 
         if i < count - 1:
             soup_d, state_d = _post_action(

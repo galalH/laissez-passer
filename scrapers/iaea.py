@@ -101,7 +101,12 @@ def fetch_detail(session: requests.Session, job_url: str) -> tuple[str | None, s
                             description = text
                             break
 
-        description = trim(description, after="ftlUtil_loadLiWidget")
+        description = trim(
+            description,
+            start=re.compile(r"\*{0,2}organizational\s+setting", re.IGNORECASE),
+            after=re.compile(r"[\n\s]+[#*\s]*Remuneration", re.IGNORECASE),
+        )
+        description = trim(description, after="\n\n','false',")
         return deadline, description
     except Exception:
         return None, None
