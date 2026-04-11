@@ -94,7 +94,9 @@ body {
   cursor: pointer;
   overflow: hidden;
 }
-.row:hover .job-title { text-decoration: underline; }
+.row:hover .job-title,
+.row.selected .job-title { text-decoration: underline; }
+.row.selected { background: #f0f9fe; }
 
 .badge {
   flex-shrink: 0;
@@ -228,9 +230,7 @@ body {
   line-height: 1.65;
   padding-bottom: 3rem;
 }
-.description p {
-  margin: 0 0 1em;
-}
+.description p { margin: 0 0 1em; }
 .description h1,
 .description h2,
 .description h3,
@@ -249,26 +249,16 @@ body {
 .description h4,
 .description h5,
 .description h6 { font-size: 14px; text-transform: uppercase; letter-spacing: 0.03em; color: #555; }
-.description a {
-  color: #009edb;
-  text-decoration: none;
-}
+.description a { color: #009edb; text-decoration: none; }
 .description a:hover { text-decoration: underline; }
 .description ul,
-.description ol {
-  margin: 0 0 1em;
-  padding-left: 1.6em;
-}
+.description ol { margin: 0 0 1em; padding-left: 1.6em; }
 .description li { margin-bottom: 0.3em; }
 .description li > ul,
 .description li > ol { margin-top: 0.2em; margin-bottom: 0; }
 .description strong { font-weight: 700; }
 .description em { font-style: italic; }
-.description hr {
-  border: none;
-  border-top: 1px solid #e8e8e8;
-  margin: 1.5em 0;
-}
+.description hr { border: none; border-top: 1px solid #e8e8e8; margin: 1.5em 0; }
 .description blockquote {
   margin: 0 0 1em;
   padding: 0.1em 0 0.1em 1em;
@@ -281,33 +271,72 @@ body {
   background: #f5f5f5;
   padding: 1px 4px;
 }
-.description pre {
-  background: #f5f5f5;
-  padding: 12px;
-  overflow-x: auto;
-  margin: 0 0 1em;
-}
-.description pre code {
-  background: none;
-  padding: 0;
-}
-.description table {
-  border-collapse: collapse;
-  width: 100%;
-  margin: 0 0 1em;
-  font-size: 13px;
-}
+.description pre { background: #f5f5f5; padding: 12px; overflow-x: auto; margin: 0 0 1em; }
+.description pre code { background: none; padding: 0; }
+.description table { border-collapse: collapse; width: 100%; margin: 0 0 1em; font-size: 13px; }
 .description th,
-.description td {
-  border: 1px solid #e8e8e8;
-  padding: 6px 10px;
-  text-align: left;
-}
-.description th {
-  font-weight: 700;
-  background: #f5f5f5;
-}
+.description td { border: 1px solid #e8e8e8; padding: 6px 10px; text-align: left; }
+.description th { font-weight: 700; background: #f5f5f5; }
 .description td { color: #333; }
+
+/* ── Help overlay ── */
+#help-overlay {
+  display: none;
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.4);
+  z-index: 100;
+  align-items: center;
+  justify-content: center;
+}
+#help-overlay.visible { display: flex; }
+#help-card {
+  background: #fff;
+  padding: 1.8rem 2rem;
+  max-width: 400px;
+  width: 90%;
+  max-height: 80vh;
+  overflow-y: auto;
+}
+.help-title {
+  font-size: 15px;
+  font-weight: 700;
+  margin: 0 0 1.2rem;
+}
+.help-section {
+  font-size: 11px;
+  font-weight: 700;
+  color: #aaa;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  margin: 1.1rem 0 0.5rem;
+}
+.help-row {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  margin-bottom: 7px;
+}
+.help-keys {
+  display: flex;
+  gap: 3px;
+  flex-shrink: 0;
+  min-width: 60px;
+}
+.help-key {
+  font-family: monospace;
+  font-size: 11px;
+  background: #f5f5f5;
+  border: 1px solid #ddd;
+  padding: 1px 6px;
+  min-width: 22px;
+  text-align: center;
+  color: #000;
+}
+.help-desc {
+  font-size: 13px;
+  color: #555;
+}
 </style>
 </head>
 <body>
@@ -352,16 +381,67 @@ body {
 
 </div>
 
+<!-- ── Help overlay (outside #app for true full-screen) ── -->
+<div id="help-overlay">
+  <div id="help-card">
+    <div class="help-title">Keyboard shortcuts</div>
+
+    <div class="help-section">Navigation</div>
+    <div class="help-row">
+      <span class="help-keys"><span class="help-key">j</span><span class="help-key">k</span></span>
+      <span class="help-desc">next / prev listing</span>
+    </div>
+    <div class="help-row">
+      <span class="help-keys"><span class="help-key">h</span><span class="help-key">l</span></span>
+      <span class="help-desc">prev / next page</span>
+    </div>
+    <div class="help-row">
+      <span class="help-keys"><span class="help-key">o</span></span>
+      <span class="help-desc">open detail / back to list</span>
+    </div>
+    <div class="help-row">
+      <span class="help-keys"><span class="help-key">O</span></span>
+      <span class="help-desc">open original posting in new tab</span>
+    </div>
+
+    <div class="help-section">List only</div>
+    <div class="help-row">
+      <span class="help-keys"><span class="help-key">/</span></span>
+      <span class="help-desc">focus search</span>
+    </div>
+    <div class="help-row">
+      <span class="help-keys"><span class="help-key">s</span></span>
+      <span class="help-desc">cycle sort order</span>
+    </div>
+    <div class="help-row">
+      <span class="help-keys"><span class="help-key">r</span></span>
+      <span class="help-desc">refresh listings</span>
+    </div>
+
+    <div class="help-section">General</div>
+    <div class="help-row">
+      <span class="help-keys"><span class="help-key">?</span></span>
+      <span class="help-desc">show / hide this overlay</span>
+    </div>
+    <div class="help-row">
+      <span class="help-keys"><span class="help-key">Esc</span></span>
+      <span class="help-desc">close overlay · back to list · blur search</span>
+    </div>
+  </div>
+</div>
+
 <script>
 marked.use({ gfm: true, breaks: false });
 
 let allJobs = [];
 let filtered = [];
+let currentSorted = [];
 let currentSort = 'new';
 let currentPage = 1;
 let PAGE_SIZE = 20;
 let resizeTimer = null;
 let updatedAt = null;
+let selectedIdx = -1;
 
 function parseGrade(raw) {
   if (!raw) return null;
@@ -448,10 +528,21 @@ function calculatePageSize() {
   PAGE_SIZE = Math.max(5, Math.floor(available / rowH));
 }
 
+// Apply .selected CSS to the row matching selectedIdx (if on current page).
+function applySelection() {
+  document.querySelectorAll('.row').forEach(el => el.classList.remove('selected'));
+  if (selectedIdx < 0) return;
+  const el = document.querySelector(`.row[data-idx="${selectedIdx}"]`);
+  if (el) {
+    el.classList.add('selected');
+    el.scrollIntoView({ block: 'nearest' });
+  }
+}
+
 function renderList() {
   const listEl = document.getElementById('list');
-  const sorted = sortJobs(filtered);
-  const total = sorted.length;
+  currentSorted = sortJobs(filtered);
+  const total = currentSorted.length;
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
   if (currentPage > totalPages) currentPage = totalPages;
 
@@ -465,7 +556,7 @@ function renderList() {
   }
 
   const start = (currentPage - 1) * PAGE_SIZE;
-  const page = sorted.slice(start, start + PAGE_SIZE);
+  const page = currentSorted.slice(start, start + PAGE_SIZE);
 
   const rows = page.map((job, i) => {
     const grade = parseGrade(job.grade);
@@ -486,13 +577,16 @@ function renderList() {
   });
 
   listEl.innerHTML = rows.join('');
+  applySelection();
 
   listEl.querySelectorAll('.row').forEach(el => {
     el.addEventListener('click', function() {
-      const job = sorted[parseInt(this.dataset.idx, 10)];
-      if (job) showDetailView(job);
+      const idx = parseInt(this.dataset.idx, 10);
+      const job = currentSorted[idx];
+      if (job) { selectedIdx = idx; showDetailView(job); }
     });
   });
+
   renderPagination(totalPages);
 }
 
@@ -549,16 +643,55 @@ function buildPageRange(current, total) {
   return result;
 }
 
+// Move selection to idx in currentSorted, changing page if needed.
+function moveTo(idx) {
+  if (currentSorted.length === 0) return;
+  idx = Math.max(0, Math.min(idx, currentSorted.length - 1));
+  selectedIdx = idx;
+
+  const pageStart = (currentPage - 1) * PAGE_SIZE;
+  const pageEnd = pageStart + PAGE_SIZE;
+
+  if (idx < pageStart || idx >= pageEnd) {
+    currentPage = Math.floor(idx / PAGE_SIZE) + 1;
+    renderList(); // applySelection is called inside renderList
+  } else {
+    applySelection();
+  }
+}
+
 // ── Navigation ──
 
 function showListView() {
   document.getElementById('view-list').style.display = '';
   document.getElementById('view-detail').style.display = 'none';
   document.title = 'Laissez-Passer';
-  window.scrollTo(0, 0);
+
+  // If selectedIdx drifted to a different page (via j/k in detail), re-paginate.
+  if (selectedIdx >= 0) {
+    const pageStart = (currentPage - 1) * PAGE_SIZE;
+    const pageEnd = pageStart + PAGE_SIZE;
+    if (selectedIdx < pageStart || selectedIdx >= pageEnd) {
+      currentPage = Math.floor(selectedIdx / PAGE_SIZE) + 1;
+      renderList();
+      return;
+    }
+  }
+
+  applySelection();
 }
 
-function showDetailView(job) {
+function showDetailView(job, push) {
+  // History: push a new entry when coming from list; replace when already in detail (j/k).
+  if (push !== false) {
+    const state = history.state || {};
+    if (state.view === 'detail') {
+      history.replaceState({ view: 'detail', jobUrl: job.url }, '');
+    } else {
+      history.pushState({ view: 'detail', jobUrl: job.url }, '');
+    }
+  }
+
   const grade = parseGrade(job.grade);
   const loc = jobLocation(job);
   const date = formatDate(job.deadline);
@@ -591,18 +724,169 @@ function showDetailView(job) {
   window.scrollTo(0, 0);
 }
 
+// ── Help overlay ──
+
+function toggleHelp() {
+  document.getElementById('help-overlay').classList.toggle('visible');
+}
+
+function closeHelp() {
+  document.getElementById('help-overlay').classList.remove('visible');
+}
+
+// ── Keyboard shortcuts ──
+
+document.addEventListener('keydown', function(e) {
+  const inInput = document.activeElement.tagName === 'INPUT' ||
+                  document.activeElement.tagName === 'TEXTAREA';
+  const inDetail = document.getElementById('view-detail').style.display === 'block';
+  const helpOpen = document.getElementById('help-overlay').classList.contains('visible');
+
+  // ? — always
+  if (e.key === '?') { toggleHelp(); return; }
+
+  // Escape — layered
+  if (e.key === 'Escape') {
+    if (helpOpen)   { closeHelp(); return; }
+    if (inDetail)   { history.back(); return; }
+    if (inInput)    { document.activeElement.blur(); return; }
+    return;
+  }
+
+  // Any other key closes help
+  if (helpOpen) { closeHelp(); return; }
+
+  // Suppress shortcuts when typing
+  if (inInput) return;
+
+  // ── Detail view shortcuts ──
+  if (inDetail) {
+    switch (e.key) {
+      case 'o':
+        history.back();
+        break;
+      case 'O': {
+        const job = currentSorted[selectedIdx];
+        if (job && job.url) window.open(job.url, '_blank');
+        break;
+      }
+      case 'j': {
+        const next = selectedIdx + 1;
+        if (next < currentSorted.length) {
+          selectedIdx = next;
+          showDetailView(currentSorted[next]); // replaceState (already in detail)
+        }
+        break;
+      }
+      case 'k': {
+        const prev = selectedIdx - 1;
+        if (prev >= 0) {
+          selectedIdx = prev;
+          showDetailView(currentSorted[prev]);
+        }
+        break;
+      }
+    }
+    return;
+  }
+
+  // ── List view shortcuts ──
+  switch (e.key) {
+    case 'j':
+      e.preventDefault();
+      moveTo(selectedIdx < 0 ? 0 : selectedIdx + 1);
+      break;
+    case 'k':
+      e.preventDefault();
+      moveTo(selectedIdx <= 0 ? 0 : selectedIdx - 1);
+      break;
+    case 'h':
+      if (currentPage > 1) {
+        currentPage--;
+        selectedIdx = -1;
+        renderList();
+        window.scrollTo(0, 0);
+      }
+      break;
+    case 'l': {
+      const totalPages = Math.ceil(currentSorted.length / PAGE_SIZE);
+      if (currentPage < totalPages) {
+        currentPage++;
+        selectedIdx = -1;
+        renderList();
+        window.scrollTo(0, 0);
+      }
+      break;
+    }
+    case 'o':
+    case 'Enter':
+      if (selectedIdx >= 0 && currentSorted[selectedIdx]) {
+        showDetailView(currentSorted[selectedIdx]);
+      }
+      break;
+    case 'O': {
+      const job = currentSorted[selectedIdx];
+      if (job && job.url) window.open(job.url, '_blank');
+      break;
+    }
+    case '/':
+      e.preventDefault();
+      document.getElementById('search').focus();
+      break;
+    case 's': {
+      const sorts = ['new', 'deadline'];
+      currentSort = sorts[(sorts.indexOf(currentSort) + 1) % sorts.length];
+      document.querySelectorAll('.sort-opt').forEach(el => {
+        el.classList.toggle('active', el.dataset.sort === currentSort);
+      });
+      selectedIdx = -1;
+      currentPage = 1;
+      renderList();
+      break;
+    }
+    case 'r':
+      document.getElementById('updated-at').click();
+      break;
+  }
+});
+
+// ── Browser back button ──
+
+window.addEventListener('popstate', function(e) {
+  const state = e.state || { view: 'list' };
+  if (state.view === 'detail') {
+    const job = allJobs.find(j => j.url === state.jobUrl);
+    if (job) {
+      selectedIdx = currentSorted.indexOf(job);
+      showDetailView(job, false);
+    } else {
+      showListView();
+    }
+  } else {
+    showListView();
+  }
+});
+
 // ── Init ──
 
 function init() {
+  history.replaceState({ view: 'list' }, '');
+
   // Back button
   document.getElementById('detail-back').addEventListener('click', function(e) {
     e.preventDefault();
-    showListView();
+    history.back();
+  });
+
+  // Help overlay — click backdrop to close
+  document.getElementById('help-overlay').addEventListener('click', function(e) {
+    if (e.target === this) closeHelp();
   });
 
   // Search
   document.getElementById('search').addEventListener('input', function() {
     filtered = applySearch(this.value.trim());
+    selectedIdx = -1;
     currentPage = 1;
     renderList();
   });
@@ -613,6 +897,7 @@ function init() {
       currentSort = this.dataset.sort;
       document.querySelectorAll('.sort-opt').forEach(s => s.classList.remove('active'));
       this.classList.add('active');
+      selectedIdx = -1;
       currentPage = 1;
       renderList();
     });
@@ -625,6 +910,7 @@ function init() {
     const p = parseInt(item.dataset.page, 10);
     if (!isNaN(p)) {
       currentPage = p;
+      selectedIdx = -1;
       renderList();
       window.scrollTo(0, 0);
     }
@@ -706,6 +992,7 @@ function init() {
                   allJobs = Array.isArray(data) ? data : (data.jobs || []);
                   updatedAt = data.updated || null;
                   filtered = applySearch(document.getElementById('search').value.trim());
+                  selectedIdx = -1;
                   currentPage = 1;
                   renderUpdatedAt();
                   el.classList.remove('refreshing');
