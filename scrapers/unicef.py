@@ -72,17 +72,26 @@ def scrape() -> list[dict]:
 
         html_desc = item.findtext(f"{{{JOB_NS}}}description") or ""
         description = html_to_md(html_desc)
-        # Strip multilingual boilerplate preambles and footers
-        description = trim(description,
-            before="to learn more about what we do at UNICEF.\n",
-            after="UNICEF will not ask for applicants' bank account information")
+        # Pass 1: strip long multilingual preambles
         if description:
-            # French variant
             description = trim(description,
-                before="pour en savoir plus sur nos actions à l'UNICEF.\n")
-            # Spanish variant
+                before=[
+                    "to learn more about what we do at UNICEF.\n",
+                    "pour en savoir plus sur nos actions à l'UNICEF.\n",
+                    "¡Y nunca nos rendimos!\n\n",
+                ])
+        # Pass 2: strip bold category headers and multilingual footers
+        if description:
             description = trim(description,
-                before="¡Y nunca nos rendimos!\n\n")
+                before=[
+                    re.compile(r"\**\s*TERMS OF REFERENCE\**"),
+                    re.compile(r"\**\s*For every child,[^\n]*\**"),
+                ],
+                after=[
+                    re.compile(r"\**\s*(?:For every Child, you demonstrate|Pour chaque enfant, vous démontrez|Para cada (?:infancia, demuestras|niño y niña, tú demuestras))"),
+                    "UNICEF will not ask for applicants' bank account information",
+                ]
+            )
 
         jobs.append({
             "agency": AGENCY,

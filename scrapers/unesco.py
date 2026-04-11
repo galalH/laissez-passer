@@ -5,7 +5,7 @@ import re
 from dateutil import parser as dateutil_parser
 from concurrent.futures import ThreadPoolExecutor
 
-from scrapers._utils import html_to_md
+from scrapers._utils import html_to_md, trim
 
 AGENCY = "UNESCO"
 AGENCY_NAME = "United Nations Educational Scientific and Cultural Organization"
@@ -74,7 +74,11 @@ def _fetch_description(session, job_url: str) -> str | None:
         resp = session.get(job_url, timeout=20)
         resp.raise_for_status()
         el = BeautifulSoup(resp.text, "html.parser").find(class_="jobdescription")
-        return html_to_md(str(el)) if el else None
+        return trim(
+            html_to_md(str(el)) if el else None,
+            before=re.compile(r"UNESCO Core Values: Commitment to the Organization, Integrity, Respect for Diversity, Professionalism\**"),
+            after=re.compile(r"\**\s*BENEFITS AND ENTITLEMENTS"),
+        )
     except Exception:
         return None
 

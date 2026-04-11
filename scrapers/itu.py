@@ -77,10 +77,7 @@ def _get_job_details(job_url, session):
 
         desc_el = soup.find(class_="jobdescription")
         description = html_to_md(str(desc_el)) if desc_el else None
-        # Strip agency preamble — try English sentinel first, then French
-        description = trim(description, before="Achieving gender balance is a high priority for ITU.\n\n")
-        if description:
-            description = trim(description, before="UNION INTERNATIONALE DES TÉLÉCOMMUNICATIONS\n\n")
+        description = trim(description, start="ORGANIZATIONAL UNIT", after="INFORMATION ON RECRUITMENT PROCESS")
 
         return grade, deadline, description
     except Exception:

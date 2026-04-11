@@ -5,7 +5,7 @@ import re
 import json
 from concurrent.futures import ThreadPoolExecutor
 
-from scrapers._utils import html_to_md
+from scrapers._utils import html_to_md, trim
 
 AGENCY = "UNFPA"
 AGENCY_NAME = "United Nations Population Fund"
@@ -135,14 +135,23 @@ def _get_form_fields(soup):
 
 
 def extract_description(soup):
+    import copy
     article = soup.find('article')
     if not article:
         return None
-    import copy
     article = copy.copy(article)
     for fg in article.find_all('div', class_='form-group'):
         fg.decompose()
-    return html_to_md(str(article))
+    # Normalize tables: rows with a single <td> get an empty second <td> so
+    # MarkItDown doesn't lock the markdown table to 1 column.
+    for tr in article.find_all('tr'):
+        cells = tr.find_all('td')
+        if len(cells) == 1:
+            cells[0]['colspan'] = 2
+    return trim(
+        html_to_md(str(article)),
+        after=[re.compile(r"\**\s*Compensation and Benefits"), re.compile(r"\**\s*UNFPA Work Environment")],
+    )
 
 
 def extract_grade(soup):

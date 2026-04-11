@@ -1,12 +1,12 @@
 """UNWTO Job Scraper - parses the HTML table on the work-with-us page."""
 
-import io
 import requests
 from bs4 import BeautifulSoup
 import json
 import re
-from pypdf import PdfReader
 from concurrent.futures import ThreadPoolExecutor
+
+from scrapers._utils import pdf_to_md, trim
 
 AGENCY = "UN Tourism"
 AGENCY_NAME = "World Tourism Organization"
@@ -57,9 +57,11 @@ def _fetch_description(session: requests.Session, url: str) -> str | None:
     try:
         resp = session.get(url, headers=HEADERS, timeout=30)
         resp.raise_for_status()
-        reader = PdfReader(io.BytesIO(resp.content))
-        text = "\n".join(page.extract_text() or "" for page in reader.pages).strip()
-        return text or None
+        return trim(
+            pdf_to_md(resp.content),
+            before="universally accessible tourism.",
+            after=re.compile(r"Remuneration\s+and\s+Other\s+Conditions"),
+        )
     except Exception:
         return None
 

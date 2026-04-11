@@ -1,10 +1,11 @@
 """WMO Job Scraper - uses the Oracle HCM Cloud REST API."""
 
+import re
 import requests
 import json
 from concurrent.futures import ThreadPoolExecutor
 
-from scrapers._utils import html_to_md
+from scrapers._utils import html_to_md, trim
 
 AGENCY = "WMO"
 AGENCY_NAME = "World Meteorological Organization"
@@ -49,6 +50,7 @@ def _fetch_detail(session, job_id):
         deadline = end_date[:10] if end_date else None
         parts = [html_to_md(item.get(f) or "") or "" for f in _DESC_FIELDS]
         description = "\n\n".join(p for p in parts if p) or None
+        description = trim(description, after=re.compile(r"\n[^\n]*?\*+[^*\n]*additional information[^*\n]*\*+", re.IGNORECASE))
         return grade, deadline, description
     except Exception:
         return None, None, None

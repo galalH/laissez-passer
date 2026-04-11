@@ -82,6 +82,7 @@ DEPT_ABBR = {
     "UNRWA - Programme Relief & Social Services - Headquarters Amman": "UNRWA",
     "UNRWA - Information Management - Headquarters Amman": "UNRWA",
     "UNRWA - External Relations - Headquarters Amman": "UNRWA",
+    "United Nations Office for Partnerships": "UNOP",
 }
 JOBS_URL = "https://careers.un.org/jobopening"
 

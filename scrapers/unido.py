@@ -3,7 +3,8 @@ import json
 from bs4 import BeautifulSoup
 from concurrent.futures import ThreadPoolExecutor
 
-from scrapers._utils import html_to_md
+import re
+from scrapers._utils import html_to_md, trim
 
 AGENCY = "UNIDO"
 AGENCY_NAME = "United Nations Industrial Development Organization"
@@ -57,7 +58,13 @@ def _fetch_description(session, job_url: str) -> str | None:
         resp = session.get(job_url, timeout=20)
         resp.raise_for_status()
         el = BeautifulSoup(resp.content, "html.parser").find(class_="jobdescription")
-        return html_to_md(str(el)) if el else None
+        if not el:
+            return None
+        return trim(
+            html_to_md(str(el)),
+            start=re.compile(r"\*+ORGANIZATIONAL CONTEXT", re.IGNORECASE),
+            after=re.compile(r"\n[^\n]*?\*+[^*\n]*competencies[^*\n]*\*+", re.IGNORECASE),
+        )
     except Exception:
         return None
 

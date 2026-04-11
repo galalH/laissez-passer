@@ -1,5 +1,6 @@
 """UNHCR Job Scraper - uses the Workday CXS JSON API."""
 
+import re
 import requests
 import json
 from concurrent.futures import ThreadPoolExecutor
@@ -37,12 +38,11 @@ def _fetch_detail(external_path):
         end_date = info.get("endDate")
         deadline = end_date[:10] if end_date else None
         description = html_to_md(info.get("jobDescription") or "")
-        if description:
-            if 'Terms of Reference' in description:
-                description = description.split('Terms of Reference', 1)[1].strip() or None
-            elif 'Standard Job Description' in description:
-                description = description.split('Standard Job Description', 1)[1].strip() or None
-        description = trim(description, after="UNHCR Salary Calculator")
+        description = trim(
+            description,
+            before=[re.compile(r"Terms of Reference\**"), re.compile(r"Standard Job Description\**")],
+            after=re.compile(r"\**\s*UNHCR Salary Calculator"),
+        )
         return deadline, description
     except Exception:
         return None, None

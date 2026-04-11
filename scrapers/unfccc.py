@@ -1,6 +1,5 @@
 """UNFCCC (UN Framework Convention on Climate Change) Job Scraper."""
 
-import io
 import re
 import requests
 from datetime import datetime
@@ -8,7 +7,8 @@ from concurrent.futures import ThreadPoolExecutor
 
 from bs4 import BeautifulSoup
 from playwright.sync_api import sync_playwright
-from pypdf import PdfReader
+
+from scrapers._utils import pdf_to_md, trim
 
 AGENCY = "UNFCCC"
 AGENCY_NAME = "United Nations Framework Convention on Climate Change"
@@ -69,9 +69,7 @@ def _fetch_description(cookies: dict, url: str) -> str | None:
         ct = resp.headers.get("Content-Type", "")
         if "pdf" not in ct.lower() and ".pdf" not in url.split("?")[0].lower():
             return None
-        reader = PdfReader(io.BytesIO(resp.content))
-        text = "\n".join(page.extract_text() or "" for page in reader.pages).strip()
-        return text or None
+        return trim(pdf_to_md(resp.content), start="Where you will be working", after="What is the selection process?")
     except Exception:
         return None
 

@@ -5,7 +5,7 @@ import requests
 from bs4 import BeautifulSoup
 from concurrent.futures import ThreadPoolExecutor
 
-from scrapers._utils import html_to_md
+from scrapers._utils import html_to_md, trim
 
 AGENCY = "OPCW"
 AGENCY_NAME = "Organisation for the Prohibition of Chemical Weapons"
@@ -28,7 +28,7 @@ def _fetch_description(session: requests.Session, job_url: str) -> str | None:
         if details:
             span = details.find("span")
             if span:
-                return html_to_md(str(span))
+                return trim(html_to_md(str(span)), start="### Job Summary", after="Additional Information")
     except Exception:
         pass
     return None

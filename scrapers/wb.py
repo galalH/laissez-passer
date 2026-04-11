@@ -67,7 +67,7 @@ def _fetch_detail(session, req_id):
         ad_soup = BeautifulSoup(ad, "html.parser")
         for t in ad_soup.find_all("table"):
             t.decompose()
-        description = trim(html_to_md(str(ad_soup)) or None, after="WBG Culture Attributes:")
+        description = trim(html_to_md(str(ad_soup)) or None, after=re.compile(r"\**\s*WBG Culture Attributes:"))
 
         return grade, city, country, deadline, description
     except Exception:

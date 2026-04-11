@@ -6,6 +6,8 @@ import json
 import re
 from concurrent.futures import ThreadPoolExecutor
 
+from scrapers._utils import html_to_md, trim
+
 AGENCY = "UNITAR"
 AGENCY_NAME = "United Nations Institute for Training and Research"
 JOBS_URL = "https://unitar.org/vacancy-announcements"
@@ -76,7 +78,7 @@ def scrape_job_detail(url: str, title: str) -> dict | None:
             overview_idx = next(
                 (i for i, l in enumerate(lines) if "overview" in l.lower()), 1
             )
-            description = "\n".join(lines[overview_idx:]) or None
+            description = trim(html_to_md(str(article)), start=re.compile(r"\*+Overview", re.IGNORECASE))
             return {
                 "agency": AGENCY,
                 "agency_name": AGENCY_NAME,
@@ -110,8 +112,7 @@ def scrape_job_detail(url: str, title: str) -> dict | None:
         city, country = _split_location(location)
         parsed_deadline = _parse_deadline(deadline)
 
-        # Description: full article text
-        description = "\n".join(lines) or None
+        description = trim(html_to_md(str(article)), start=re.compile(r"\*+Overview", re.IGNORECASE))
 
         return {
             "agency": AGENCY,

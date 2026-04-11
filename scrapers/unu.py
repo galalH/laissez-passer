@@ -7,6 +7,7 @@ import warnings
 from dateutil import parser as dateutil_parser
 from dateutil.parser import UnknownTimezoneWarning
 
+from bs4 import BeautifulSoup
 from scrapers._utils import html_to_md
 
 AGENCY = "UNU"
@@ -72,6 +73,11 @@ def scrape() -> list[dict]:
         grade = m.group(1) if m else None
 
         html_desc = o.get("description") or ""
+        soup = BeautifulSoup(html_desc, "html.parser")
+        h3s = soup.find_all("h3")
+        if len(h3s) >= 3:
+            third_h3 = h3s[2]
+            html_desc = str(third_h3) + "".join(str(s) for s in third_h3.next_siblings)
         description = html_to_md(html_desc)
 
         jobs.append({

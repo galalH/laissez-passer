@@ -42,7 +42,8 @@ def fetch_detail(session: requests.Session, job_url: str) -> str | None:
             decoded = unquote(best.replace('%5C:', ':'))
             return trim(
                 html_to_md(decoded),
-                after="Applications from qualified women as well as from qualified nationals of unrepresented Member States of WIPO",
+                start=re.compile(r"\*+\d+\.\*+Organizational Context", re.IGNORECASE),
+                after=re.compile(r"\n\*+\d+\.\*+Organizational Competencies", re.IGNORECASE),
             )
     except Exception:
         pass

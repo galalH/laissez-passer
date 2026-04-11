@@ -73,11 +73,7 @@ def _fetch_detail(session, job_id):
             paragraphs = [p for p in paragraphs if _MARKER not in p]
             description = '\n\n'.join(paragraphs).strip() or None
         # Strip footer — whichever sentinel appears first
-        if description:
-            for _sentinel in ("At UN Women, we are committed", "Statements:"):
-                if _sentinel in description:
-                    description = trim(description, after=_sentinel)
-                    break
+        description = trim(description, after=["At UN Women, we are committed", re.compile(r"\*+\s*Statements :")])
         return grade, deadline, description
     except Exception:
         return None, None, None

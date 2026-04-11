@@ -1,3 +1,4 @@
+import re
 import requests
 from concurrent.futures import ThreadPoolExecutor
 from typing import Optional
@@ -27,7 +28,7 @@ def _fetch_description(session: requests.Session, job_url: str) -> str | None:
         item = (resp.json().get("items") or [{}])[0]
         parts = [html_to_md(item.get(f) or "") or "" for f in _DESC_FIELDS]
         description = "\n\n".join(p for p in parts if p) or None
-        return trim(description, after="Equal opportunity")
+        return trim(description, after=re.compile(r"\*+\s*Equal opportunity"))
     except Exception:
         return None
 

@@ -32,6 +32,7 @@ def _fetch_detail(session, external_path):
             description = description.split(_PREAMBLE_END, 1)[1]
             if description.startswith(".\n"):
                 description = description.lstrip(".\n").strip() or None
+        description = trim(description, after=re.compile(r"\**\s*Additional Information"))
         return description
     except Exception:
         return None

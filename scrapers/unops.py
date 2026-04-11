@@ -51,9 +51,22 @@ def _fetch_detail(url, session):
                 grade = lines[i + 1]
                 break
 
-        sections = soup.find_all("div", id=re.compile(r"^section\d+__content$"))
-        description = html_to_md("".join(str(s) for s in sections if s.get_text(strip=True))) or None
-        description = trim(description, after="Please note that UNOPS does not accept unsolicited resumes.")
+        html_parts = []
+        in_range = False
+        for h3 in soup.find_all("h3", id=re.compile(r"^section\d+__title$")):
+            text = h3.get_text(strip=True)
+            if "Additional Information" in text:
+                break
+            if "Job Specific Context" in text:
+                in_range = True
+            if in_range:
+                content_div = soup.find("div", id=h3["id"].replace("__title", "__content"))
+                html_parts.append(str(h3))
+                if content_div:
+                    for img in content_div.find_all("img"):
+                        img.decompose()
+                    html_parts.append(str(content_div))
+        description = html_to_md("".join(html_parts)) or None
 
         return grade, description
     except Exception:

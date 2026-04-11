@@ -1,11 +1,11 @@
 """UNSSC Job Scraper - scrapes UNSSC employment opportunities from Drupal CMS."""
 
-import io
 import requests
 import re
 from bs4 import BeautifulSoup
-from pypdf import PdfReader
 from concurrent.futures import ThreadPoolExecutor
+
+from scrapers._utils import pdf_to_md, trim
 
 AGENCY = "UNSSC"
 AGENCY_NAME = "United Nations System Staff College"
@@ -62,9 +62,7 @@ def _fetch_description(session: requests.Session, job_url: str) -> str | None:
     try:
         resp = session.get(job_url, headers=HEADERS, timeout=30)
         resp.raise_for_status()
-        reader = PdfReader(io.BytesIO(resp.content))
-        text = "\n".join(page.extract_text() or "" for page in reader.pages).strip()
-        return text or None
+        return trim(pdf_to_md(resp.content), start="Organizational Context", after="Submission of applications")
     except Exception:
         return None
 
