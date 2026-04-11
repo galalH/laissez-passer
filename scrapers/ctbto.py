@@ -73,14 +73,24 @@ def fetch_detail(session: requests.Session, job_id: int) -> tuple[str | None, st
         deadline = parse_verbose_date(deadline_m.group(1)) if deadline_m else None
 
         soup = BeautifulSoup(html, "html.parser")
-        desc_table = next(
-            (t for t in soup.find_all("table")
-             if len(t.get_text(strip=True)) > 100
-             and "Grade Level" not in t.get_text()
-             and "friend" not in t.get_text()),
-            None
-        )
-        description = html_to_md(str(desc_table)) if desc_table else None
+
+        # Find the <p> containing "Organizational Background" and collect
+        # all following siblings up to (not including) "Additional Information"
+        description = None
+        org_p = None
+        for strong in soup.find_all("strong"):
+            if re.search(r"Organizational\s+Background", strong.get_text(), re.IGNORECASE):
+                org_p = strong.find_parent("p")
+                break
+        if org_p:
+            content = [str(org_p)]
+            for sib in org_p.next_siblings:
+                if hasattr(sib, "get_text") and re.search(
+                    r"Additional\s+Information", sib.get_text(), re.IGNORECASE
+                ):
+                    break
+                content.append(str(sib))
+            description = html_to_md("".join(content)) or None
 
         return grade, deadline, description
     except Exception:
