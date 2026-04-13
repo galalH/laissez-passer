@@ -2,12 +2,14 @@
 """Laissez-Passer — Flask app and scraper driver."""
 
 import importlib.util
+import io
 import json
 import logging
 import os
 import random
 import re
 import sys
+import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 from pathlib import Path
@@ -259,6 +261,169 @@ def scrape(progress=print):
     return all_jobs
 
 
+# ── Scoring ──────────────────────────────────────────────────────────────────
+
+_SCORE_TOOL = {
+    "type": "function",
+    "function": {
+        "name": "record_score",
+        "description": "Record the relevance score for the job listing.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "score": {
+                    "type": "number",
+                    "description": "Relevance score between 0.0 and 1.0",
+                }
+            },
+            "required": ["score"],
+        },
+    },
+}
+
+_SCORE_TOOL_CHOICE = {"type": "function", "function": {"name": "record_score"}}
+
+_PERSONA_FILE = BASE_DIR / "static" / "persona.md"
+
+
+def _build_score_message(job: dict) -> str:
+    location = ", ".join(filter(None, [job.get("city", ""), job.get("country", "")]))
+    header = " | ".join(filter(None, [
+        job.get("agency_name", ""),
+        job.get("job_title", ""),
+        location,
+    ]))
+    description = (job.get("description") or "").strip()
+    return (
+        f"{header}\n\n"
+        f"{description}\n\n"
+        "Score this job's relevance to the persona on a scale of 0.0 to 1.0. "
+        "Call record_score with your score."
+    )
+
+
+def score_new_jobs(all_jobs: list, progress=print) -> None:
+    """Score jobs that are missing a score using GPT-5.4-nano via OpenAI Batch API."""
+    api_key = os.environ.get("OPENAI_API_KEY")
+    if not api_key:
+        progress("scoring_skip:no OPENAI_API_KEY — skipping scoring")
+        return
+
+    if not _PERSONA_FILE.exists():
+        progress("scoring_skip:persona file not found — skipping scoring")
+        return
+
+    try:
+        import openai
+    except ImportError as e:
+        progress(f"scoring_skip:missing dependency ({e}) — skipping scoring")
+        return
+
+    try:
+        persona = _PERSONA_FILE.read_text().strip()
+        grade_prefixes = ("IICA", "IPSA", "EC")
+
+        to_score = [
+            (i, job) for i, job in enumerate(all_jobs)
+            if job.get("score") is None
+        ]
+
+        if not to_score:
+            progress("scoring_skip:all jobs already scored")
+            return
+
+        progress(f"scoring_start:{len(to_score)}")
+
+        client = openai.OpenAI(api_key=api_key, max_retries=0)
+
+        lines = [
+            json.dumps({
+                "custom_id": str(idx),
+                "method": "POST",
+                "url": "/v1/chat/completions",
+                "body": {
+                    "model": "gpt-5.4-nano",
+                    "max_completion_tokens": 64,
+                    "tools": [_SCORE_TOOL],
+                    "tool_choice": _SCORE_TOOL_CHOICE,
+                    "messages": [
+                        {"role": "system", "content": persona},
+                        {"role": "user", "content": _build_score_message(job)},
+                    ],
+                },
+            })
+            for idx, job in to_score
+        ]
+        jsonl_bytes = "\n".join(lines).encode()
+
+        batch_file = client.files.create(
+            file=("score.jsonl", io.BytesIO(jsonl_bytes), "application/jsonl"),
+            purpose="batch",
+        )
+        batch = client.batches.create(
+            input_file_id=batch_file.id,
+            endpoint="/v1/chat/completions",
+            completion_window="24h",
+        )
+        batch_id = batch.id
+        started_at = time.monotonic()
+
+        while True:
+            batch = client.batches.retrieve(batch_id)
+            counts = batch.request_counts
+            elapsed = int(time.monotonic() - started_at)
+            progress(f"scoring:{counts.completed}/{counts.total}:{elapsed}")
+            if batch.status in ("completed", "failed", "expired", "cancelled"):
+                break
+            time.sleep(10)
+
+        if batch.status != "completed":
+            progress(f"scoring_skip:batch ended with status {batch.status}")
+            return
+
+        result_text = client.files.content(batch.output_file_id).text
+        scores: dict[int, float | None] = {}
+        for line in result_text.strip().splitlines():
+            row = json.loads(line)
+            idx = int(row["custom_id"])
+            error = row.get("error")
+            if error:
+                scores[idx] = None
+            else:
+                tool_calls = row["response"]["body"]["choices"][0]["message"].get("tool_calls", [])
+                score = None
+                for tc in tool_calls:
+                    name = tc["function"]["name"] if isinstance(tc, dict) else tc.function.name
+                    args = tc["function"]["arguments"] if isinstance(tc, dict) else tc.function.arguments
+                    if name == "record_score":
+                        try:
+                            score = float(json.loads(args)["score"])
+                        except (KeyError, TypeError, ValueError, json.JSONDecodeError):
+                            pass
+                        break
+                scores[idx] = score
+
+        for idx, job in to_score:
+            job["score"] = scores.get(idx)
+
+        # Reload to get the updated timestamp written by scrape(), then write scores back
+        try:
+            with DATA_FILE.open() as f:
+                payload = json.load(f)
+            updated = payload.get("updated", "")
+        except Exception:
+            updated = ""
+        with DATA_FILE.open("w") as f:
+            json.dump({"updated": updated, "jobs": all_jobs}, f,
+                      ensure_ascii=False, separators=(",", ":"))
+
+        n_scored = sum(1 for s in scores.values() if s is not None)
+        progress(f"scoring_done:{n_scored}/{len(to_score)}")
+
+    except Exception as e:
+        progress(f"scoring_skip:scoring failed ({e})")
+
+
 # ---------------------------------------------------------------------------
 # Flask app
 # ---------------------------------------------------------------------------
@@ -288,13 +453,7 @@ def refresh():
 
 
 def _scrape_lines():
-    """Run scrape(), yielding each progress line as it's emitted."""
-    lines = []
-
-    def collect(msg):
-        lines.append(msg)
-
-    # We need streaming, so run synchronously and yield via a queue
+    """Run scrape() then score_new_jobs(), yielding progress lines as they're emitted."""
     import queue
     import threading
 
@@ -305,7 +464,8 @@ def _scrape_lines():
 
     def run():
         try:
-            scrape(progress=progress)
+            all_jobs = scrape(progress=progress)
+            score_new_jobs(all_jobs, progress=progress)
         finally:
             q.put(None)  # sentinel
 

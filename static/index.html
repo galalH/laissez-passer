@@ -354,7 +354,9 @@ body {
       <div id="sort-controls">
         <span id="sort-label">sort by</span>
         <span class="sort-sep">·</span>
-        <span class="sort-opt active" data-sort="new">new</span>
+        <span class="sort-opt active" data-sort="relevance">relevance</span>
+        <span class="sort-sep">·</span>
+        <span class="sort-opt" data-sort="new">new</span>
         <span class="sort-sep">·</span>
         <span class="sort-opt" data-sort="deadline">deadline</span>
       </div>
@@ -436,7 +438,7 @@ marked.use({ gfm: true, breaks: false });
 let allJobs = [];
 let filtered = [];
 let currentSorted = [];
-let currentSort = 'new';
+let currentSort = 'relevance';
 let currentPage = 1;
 let PAGE_SIZE = 20;
 let resizeTimer = null;
@@ -495,6 +497,12 @@ function sortJobs(jobs) {
       if (!a.deadline) return 1;
       if (!b.deadline) return -1;
       return a.deadline < b.deadline ? -1 : a.deadline > b.deadline ? 1 : 0;
+    });
+  } else if (currentSort === 'relevance') {
+    arr.sort((a, b) => {
+      const sa = a.score != null ? a.score : -1;
+      const sb = b.score != null ? b.score : -1;
+      return sb - sa;
     });
   }
   return arr;
@@ -837,7 +845,7 @@ document.addEventListener('keydown', function(e) {
       document.getElementById('search').focus();
       break;
     case 's': {
-      const sorts = ['new', 'deadline'];
+      const sorts = ['relevance', 'new', 'deadline'];
       currentSort = sorts[(sorts.indexOf(currentSort) + 1) % sorts.length];
       document.querySelectorAll('.sort-opt').forEach(el => {
         el.classList.toggle('active', el.dataset.sort === currentSort);
@@ -1002,6 +1010,17 @@ function init() {
             el.textContent = agency + '… ' + fraction;
           } else if (msg.startsWith('done:')) {
             el.textContent = msg.slice(5);
+          } else if (msg.startsWith('scoring_start:')) {
+            const n = msg.slice(14);
+            el.textContent = 'scoring ' + n + ' jobs…';
+          } else if (msg.startsWith('scoring:')) {
+            const parts = msg.slice(8).split(':');
+            el.textContent = 'scoring… ' + parts[0] + '/' + parts[1];
+          } else if (msg.startsWith('scoring_done:')) {
+            const parts = msg.slice(13).split('/');
+            el.textContent = 'scored ' + parts[0] + ' of ' + parts[1] + ' jobs';
+          } else if (msg.startsWith('scoring_skip:')) {
+            console.warn('[scoring]', msg.slice(13));
           } else if (msg.startsWith('warning:')) {
             console.warn('[refresh]', msg.slice(8));
           }

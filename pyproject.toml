@@ -14,5 +14,8 @@ dependencies = [
     "pandas",
     "playwright",
     "python-dateutil",
+    "anthropic",
+    "openai",
+    "aiohttp",
     "requests",
 ]
