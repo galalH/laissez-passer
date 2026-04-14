@@ -35,6 +35,8 @@ export OPENAI_API_KEY=sk-...
 
 Scoring is skipped silently if the key is absent or if no persona is configured.
 
+A sample `static/persona.md` and `static/filter.json` are included in the repo for illustration — replace them with your own.
+
 ### Persona
 
 A persona is a plain-text (Markdown) description of what you're looking for — your background, skills, and the kinds of roles you're interested in. It is used as the system prompt when scoring each job.
