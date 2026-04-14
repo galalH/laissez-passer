@@ -16,7 +16,7 @@ from pathlib import Path
 
 import country_converter as coco
 import pandas as pd
-from flask import Flask, Response, jsonify, send_from_directory, stream_with_context
+from flask import Flask, Response, jsonify, request, send_from_directory, stream_with_context
 
 from scrapers._grade import normalize_grade
 
@@ -43,6 +43,7 @@ for _col in ("name_short", "name_official"):
 BASE_DIR = Path(__file__).parent
 SCRAPERS_DIR = BASE_DIR / "scrapers"
 DATA_FILE = BASE_DIR / "static" / "data.json"
+FILTER_FILE = BASE_DIR / "static" / "filter.json"
 
 _DUTY_STATION_URL = "https://unsceb.org/sites/default/files/statistic_files/HR/duty_station.csv"
 
@@ -491,7 +492,8 @@ def _resume_scoring(progress) -> bool:
         with open(DATA_FILE) as f:
             payload = json.load(f)
         all_jobs = payload.get("jobs", [])
-        total = sum(1 for job in all_jobs if job.get("score") is None)
+        source = _apply_filter(all_jobs)
+        total = sum(1 for job in source if job.get("score") is None)
 
         if not total:
             return False
@@ -521,7 +523,7 @@ def _resume_scoring(progress) -> bool:
                 continue
             all_scores.update(_parse_batch_scores(client.files.content(b.output_file_id).text))
 
-        for i, job in enumerate(all_jobs):
+        for i, job in enumerate(source):
             if i in all_scores:
                 job["score"] = all_scores[i]
 
@@ -544,6 +546,124 @@ def _resume_scoring(progress) -> bool:
         return False
 
 
+# ── Filter helpers ────────────────────────────────────────────────────────────
+
+_SCHEMA_DESC = """\
+DataFrame columns:
+- agency: str — 3-4 letter agency code, e.g. "UNDP", "WHO", "WFP", "UNICEF", "UNHCR"
+- agency_name: str — full agency name
+- job_title: str
+- grade: str — normalized canonical grade (see values below)
+- grade_category: str — one of: Professional, Director, General Service, Field Service,
+  National Officer, Service Contract, Consultant, Internship, Volunteer, Other
+- city: str or None
+- country_iso3: str — ISO 3166-1 alpha-3 code; use this for country filtering, NOT the
+  country name. Special values: "XRM" = Home Based/Remote, "XMU" = Multiple Locations,
+  "XXX" = unknown. Examples: "FRA", "USA", "KEN", "CHE", "DEU", "GBR", "ETH", "TZA"
+- deadline: str or None — calendar date "YYYY-MM-DD", e.g. "2026-06-30"
+- pubdate: str — first-seen timestamp "YYYY-MM-DDTHH:MM:SS+HH:MM", e.g. "2026-04-14T10:00:00+02:00"
+- score: float or None — relevance score 0.0–1.0
+
+Canonical grade values by category:
+  Professional:     P-1  P-2  P-3  P-4  P-5
+  Director:         P-6  P-7  D-1  D-2
+  General Service:  G-1  G-2  G-3  G-4  G-5  G-6  G-7
+  Field Service:    FS-1  FS-2  FS-3  FS-4  FS-5  FS-6  FS-7
+  National Officer: NO-A  NO-B  NO-C  NO-D  NO-E
+  Service Contract (local, levels 1–11): SC L-1 … SC L-11  SC L-UNK
+  Service Contract (intl, levels 1–7):   SC I-1 … SC I-7   SC I-UNK
+  Service Contract (level unknown):      SC UNK
+  Consultant:   CONS
+  Internship:   INTERN
+  Volunteer:    VOL
+  Other/unclassified: OTHER
+  World Bank codes (mapped to categories above): GA GB GC GD (GS) | GE GF GG GH (Prof) | GI GJ GK (Dir)
+  IMF codes: A01–A08 (GS) | A09–A15 (Prof) | B01–B05 (Dir)
+
+Query rules:
+- ALWAYS filter by country_iso3, never by the country name string.
+- Both deadline and pubdate sort correctly as plain strings (ISO format is lexicographic).
+- String comparisons are case-sensitive.
+- For substring matching: job_title.str.contains("data", case=False, na=False)
+- To match multiple grade_category values: grade_category in ["Professional", "Director"]
+"""
+
+
+def _apply_filter(all_jobs: list) -> list:
+    """Return the subset of all_jobs matching filter.json, or all_jobs if no filter."""
+    if not FILTER_FILE.exists():
+        return all_jobs
+    try:
+        config = json.loads(FILTER_FILE.read_text())
+    except Exception:
+        return all_jobs
+    pandas_query = (config.get("pandas_query") or "").strip()
+    if not pandas_query:
+        return all_jobs
+    try:
+        df = pd.DataFrame(all_jobs)
+        filtered_df = df.query(pandas_query)
+        return [all_jobs[i] for i in filtered_df.index]
+    except Exception as e:
+        print(f"WARNING: filter application failed: {e}", file=sys.stderr)
+        return all_jobs
+
+
+def _translate_filter(natural_language: str, prev_query: str = "", error: str = "") -> str:
+    """Call GPT nano to translate natural language to a pandas query string."""
+    try:
+        import openai
+    except ImportError:
+        raise ValueError("openai package not installed")
+    api_key = os.environ.get("OPENAI_API_KEY")
+    if not api_key:
+        raise ValueError("OPENAI_API_KEY not set")
+    client = openai.OpenAI(api_key=api_key, max_retries=0)
+    system = (
+        "You are a pandas query translator. Given a natural language description and a "
+        "dataframe schema, output ONLY a valid pandas DataFrame.query() string. "
+        "No explanation, no markdown, no backticks — just the raw query string.\n\n"
+        + _SCHEMA_DESC
+    )
+    messages: list[dict] = [
+        {"role": "system", "content": system},
+        {"role": "user", "content": f"Natural language filter: {natural_language}"},
+    ]
+    if prev_query and error:
+        messages += [
+            {"role": "assistant", "content": prev_query},
+            {"role": "user", "content": f"That query failed with: {error}\nProvide a corrected query."},
+        ]
+    resp = client.chat.completions.create(
+        model="gpt-5.4-nano",
+        messages=messages,
+        max_completion_tokens=200,
+    )
+    raw = resp.choices[0].message.content.strip()
+    for ch in ("`", '"', "'"):
+        if raw.startswith(ch) and raw.endswith(ch):
+            raw = raw[1:-1]
+    return raw.strip()
+
+
+def _validate_filter(pandas_query: str) -> tuple[bool, str]:
+    """Try the query against a tiny test dataframe; return (ok, error_message)."""
+    test_data = {
+        "agency": ["UNDP"], "agency_name": ["UN Development Programme"],
+        "job_title": ["Data Analyst"], "grade": ["P-4"],
+        "grade_category": ["Professional"], "city": ["New York"],
+        "country_iso3": ["USA"],
+        "deadline": ["2026-06-01"], "pubdate": ["2026-04-14T10:00:00+02:00"],
+        "score": [0.5],
+    }
+    df = pd.DataFrame(test_data)
+    try:
+        df.query(pandas_query)
+        return True, ""
+    except Exception as e:
+        return False, str(e)
+
+
 # ---------------------------------------------------------------------------
 # Flask app
 # ---------------------------------------------------------------------------
@@ -560,7 +680,167 @@ def index():
 def data():
     if not DATA_FILE.exists():
         return jsonify({"error": "no data yet"}), 404
-    return send_from_directory(app.static_folder, "data.json")
+
+    # Apply pandas filter if configured
+    filter_config: dict = {}
+    if FILTER_FILE.exists():
+        try:
+            filter_config = json.loads(FILTER_FILE.read_text())
+        except Exception:
+            pass
+    pandas_query = (filter_config.get("pandas_query") or "").strip()
+
+    if not pandas_query:
+        return send_from_directory(app.static_folder, "data.json")
+
+    try:
+        with open(DATA_FILE) as f:
+            payload = json.load(f)
+        jobs = payload.get("jobs", [])
+        df = pd.DataFrame(jobs)
+        filtered_df = df.query(pandas_query)
+        filtered_jobs = [jobs[i] for i in filtered_df.index]
+        return jsonify({**payload, "jobs": filtered_jobs})
+    except Exception as e:
+        print(f"WARNING: filter in /data.json failed: {e}", file=sys.stderr)
+        return send_from_directory(app.static_folder, "data.json")
+
+
+@app.route("/persona.md", methods=["GET"])
+def get_persona():
+    if not _PERSONA_FILE.exists():
+        return "", 204
+    return _PERSONA_FILE.read_text(), 200, {"Content-Type": "text/plain; charset=utf-8"}
+
+
+@app.route("/persona.md", methods=["POST"])
+def save_persona_route():
+    import queue
+    import threading
+
+    text = request.get_data(as_text=True)
+    _PERSONA_FILE.write_text(text)
+
+    if not text.strip():
+        # Persona cleared — nothing to score
+        return Response("data:scoring_skip:persona cleared\n\n", mimetype="text/event-stream")
+
+    # Reset all scores so the new persona is applied to everything
+    if DATA_FILE.exists():
+        try:
+            with open(DATA_FILE) as f:
+                payload = json.load(f)
+            for job in payload.get("jobs", []):
+                job["score"] = None
+            with open(DATA_FILE, "w") as f:
+                json.dump(payload, f, ensure_ascii=False, separators=(",", ":"))
+        except Exception as e:
+            print(f"WARNING: could not reset scores: {e}", file=sys.stderr)
+
+    q: queue.Queue = queue.Queue()
+
+    def progress(msg: str) -> None:
+        q.put(msg)
+
+    def run() -> None:
+        try:
+            if DATA_FILE.exists():
+                with open(DATA_FILE) as f:
+                    payload = json.load(f)
+                all_jobs = payload.get("jobs", [])
+                jobs_to_score = _apply_filter(all_jobs)
+                score_new_jobs(all_jobs, progress=progress, jobs_to_score=jobs_to_score)
+        except Exception as e:
+            progress(f"scoring_skip:re-scoring failed: {e}")
+        finally:
+            q.put(None)
+
+    threading.Thread(target=run, daemon=True).start()
+
+    def generate():
+        while True:
+            msg = q.get()
+            if msg is None:
+                break
+            yield f"data:{msg}\n\n"
+
+    return Response(stream_with_context(generate()), mimetype="text/event-stream")
+
+
+@app.route("/filter.json", methods=["GET", "POST"])
+def filter_json():
+    if request.method == "GET":
+        if not FILTER_FILE.exists():
+            return jsonify({})
+        try:
+            return jsonify(json.loads(FILTER_FILE.read_text()))
+        except Exception:
+            return jsonify({})
+
+    # POST
+    body = request.get_json(silent=True) or {}
+    natural_language = (body.get("natural_language") or "").strip()
+
+    if not natural_language:
+        FILTER_FILE.write_text("{}")
+        return jsonify({"status": "ok", "pandas_query": None})
+
+    # Return cached translation when the text hasn't changed
+    existing: dict = {}
+    if FILTER_FILE.exists():
+        try:
+            existing = json.loads(FILTER_FILE.read_text())
+        except Exception:
+            pass
+    if existing.get("natural_language") == natural_language and existing.get("pandas_query"):
+        return jsonify({"status": "ok", "pandas_query": existing["pandas_query"]})
+
+    # Translate with up to 3 retries
+    pandas_query = None
+    last_query = ""
+    last_error = ""
+    for _ in range(3):
+        try:
+            candidate = _translate_filter(natural_language, last_query, last_error)
+            ok, err = _validate_filter(candidate)
+            if ok:
+                pandas_query = candidate
+                break
+            last_query = candidate
+            last_error = err
+        except ValueError as e:
+            return jsonify({"status": "error", "message": str(e)}), 500
+        except Exception as e:
+            last_error = str(e)
+
+    if pandas_query is None:
+        return jsonify({
+            "status": "error",
+            "message": f"Could not generate a valid filter after 3 attempts. Last error: {last_error}",
+        }), 400
+
+    FILTER_FILE.write_text(json.dumps(
+        {"natural_language": natural_language, "pandas_query": pandas_query},
+        ensure_ascii=False,
+    ))
+    return jsonify({"status": "ok", "pandas_query": pandas_query})
+
+
+@app.route("/api/config")
+def api_config():
+    has_persona = _PERSONA_FILE.exists() and bool(_PERSONA_FILE.read_text().strip())
+    filter_config: dict = {}
+    if FILTER_FILE.exists():
+        try:
+            filter_config = json.loads(FILTER_FILE.read_text())
+        except Exception:
+            pass
+    has_filter = bool(filter_config.get("pandas_query"))
+    return jsonify({
+        "has_persona": bool(has_persona),
+        "has_filter": has_filter,
+        "filter_nl": filter_config.get("natural_language", ""),
+    })
 
 
 @app.route("/refresh", methods=["POST"])
@@ -586,7 +866,8 @@ def _scrape_lines():
         try:
             if not _resume_scoring(progress):
                 all_jobs = scrape(progress=progress)
-                score_new_jobs(all_jobs, progress=progress)
+                jobs_to_score = _apply_filter(all_jobs)
+                score_new_jobs(all_jobs, progress=progress, jobs_to_score=jobs_to_score)
         finally:
             q.put(None)  # sentinel
 

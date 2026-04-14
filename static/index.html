@@ -9,6 +9,9 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;700&display=swap" rel="stylesheet">
 <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/codemirror@5/lib/codemirror.css">
+<script src="https://cdn.jsdelivr.net/npm/codemirror@5/lib/codemirror.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/codemirror@5/mode/markdown/markdown.js"></script>
 <style>
 *, *::before, *::after { box-sizing: border-box; }
 html, body { height: 100%; margin: 0; padding: 0; }
@@ -337,6 +340,180 @@ body {
   font-size: 13px;
   color: #555;
 }
+
+/* ── Header row (site name + gear) ── */
+#header-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+}
+
+/* ── Gear / settings button ── */
+#settings-btn {
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 4px 2px;
+  color: #ccc;
+  font-size: 18px;
+  line-height: 1;
+  flex-shrink: 0;
+  margin-top: 4px;
+}
+#settings-btn:hover { color: #555; }
+
+/* ── Settings modal ── */
+#settings-overlay {
+  display: none;
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.4);
+  z-index: 200;
+  align-items: center;
+  justify-content: center;
+}
+#settings-overlay.visible { display: flex; }
+#settings-modal {
+  background: #fff;
+  width: 640px;
+  max-width: 95vw;
+  height: 80vh;
+  display: flex;
+  flex-direction: column;
+}
+#settings-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 1rem 1.25rem 0.75rem;
+  border-bottom: 1px solid #e8e8e8;
+  flex-shrink: 0;
+}
+#settings-title { font-size: 15px; font-weight: 700; }
+#settings-close {
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: #aaa;
+  font-size: 16px;
+  padding: 2px 4px;
+  line-height: 1;
+}
+#settings-close:hover { color: #000; }
+#settings-body {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  padding: 1rem 1.25rem;
+  gap: 0.75rem;
+  min-height: 0;
+  overflow: hidden;
+}
+.settings-field {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+.settings-field.persona-field { flex: 4; }
+.settings-field.filter-field  { flex: 1; }
+.settings-label {
+  font-size: 11px;
+  font-weight: 700;
+  color: #aaa;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  margin-bottom: 0.35rem;
+  flex-shrink: 0;
+}
+.settings-field textarea {
+  font-family: 'Roboto', sans-serif;
+  font-size: 13px;
+  border: 1px solid #ccc;
+  padding: 8px;
+  resize: none;
+  outline: none;
+  flex: 1;
+  min-height: 0;
+  line-height: 1.55;
+  color: #000;
+}
+.settings-field textarea:focus { border-color: #888; }
+
+/* CodeMirror inside the persona field */
+.persona-field .CodeMirror {
+  flex: 1;
+  min-height: 0;
+  height: 100%;
+  border: 1px solid #ccc;
+  font-family: 'Roboto', sans-serif;
+  font-size: 13px;
+  line-height: 1.55;
+  padding: 0;
+  background: #fff;
+  color: #000;
+  border-radius: 0;
+  box-shadow: none;
+}
+.persona-field .CodeMirror.CodeMirror-focused { border-color: #888; }
+.persona-field .CodeMirror-scroll { padding: 6px 8px; box-sizing: border-box; }
+.persona-field .CodeMirror-lines { padding: 0; }
+.persona-field .CodeMirror-cursor { border-left-color: #000; }
+/* Markdown token colours */
+.persona-field .cm-header   { font-weight: 700; color: #000; }
+.persona-field .cm-strong   { font-weight: 700; }
+.persona-field .cm-em       { font-style: italic; color: #333; }
+.persona-field .cm-link     { color: #009edb; }
+.persona-field .cm-url      { color: #009edb; text-decoration: underline; }
+.persona-field .cm-comment  { color: #777; }  /* blockquote */
+.persona-field .cm-meta     { color: #009edb; } /* code fence markers */
+.persona-field .cm-hr       { color: #bbb; }
+.persona-field .cm-formatting { color: #bbb; } /* **, __, ## etc. */
+#settings-footer {
+  padding: 0.75rem 1.25rem;
+  border-top: 1px solid #e8e8e8;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+#settings-error {
+  font-size: 12px;
+  color: #cc3300;
+}
+#settings-error:empty { display: none; }
+#settings-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+.s-btn {
+  font-family: 'Roboto', sans-serif;
+  font-size: 13px;
+  padding: 5px 16px;
+  border: 1px solid #ccc;
+  cursor: pointer;
+  background: #fff;
+  color: #000;
+}
+.s-btn:hover { background: #f5f5f5; }
+.s-btn.primary { background: #009edb; color: #fff; border-color: #009edb; }
+.s-btn.primary:hover { background: #0080b5; border-color: #0080b5; }
+.s-btn:disabled { opacity: 0.5; cursor: default; }
+
+/* ── Score error status (below table) ── */
+#score-error {
+  font-size: 12px;
+  color: #cc3300;
+  padding: 4px 0 0;
+}
+#score-error:empty { display: none; }
+
+/* ── Disabled relevance sort option ── */
+.sort-opt.disabled {
+  opacity: 0.35;
+  cursor: default;
+  pointer-events: none;
+}
 </style>
 </head>
 <body>
@@ -345,8 +522,13 @@ body {
   <!-- ── List view ── -->
   <div id="view-list">
     <div id="header">
-      <div id="site-name">Laissez-Passer</div>
-      <div id="tagline">Your pass to what's next.</div>
+      <div id="header-row">
+        <div>
+          <div id="site-name">Laissez-Passer</div>
+          <div id="tagline">Your pass to what's next.</div>
+        </div>
+        <button id="settings-btn" title="Settings" aria-label="Open settings">⚙</button>
+      </div>
     </div>
 
     <div id="toolbar">
@@ -364,6 +546,7 @@ body {
     </div>
 
     <div id="list"><div id="status">loading…</div></div>
+    <div id="score-error"></div>
     <div id="footer">
       <span id="updated-at"></span>
       <div id="pagination"></div>
@@ -381,6 +564,33 @@ body {
     <div id="detail-description" class="description"></div>
   </div>
 
+</div>
+
+<!-- ── Settings modal ── -->
+<div id="settings-overlay">
+  <div id="settings-modal">
+    <div id="settings-header">
+      <span id="settings-title">Settings</span>
+      <button id="settings-close" aria-label="Close settings">✕</button>
+    </div>
+    <div id="settings-body">
+      <div class="settings-field persona-field">
+        <div class="settings-label">Persona</div>
+        <textarea id="persona-input" spellcheck="true" placeholder="Describe your background, skills, and job preferences…"></textarea>
+      </div>
+      <div class="settings-field filter-field">
+        <div class="settings-label">Filter</div>
+        <textarea id="filter-input" spellcheck="false" placeholder="e.g. Professional or Director grade, home-based or in Europe"></textarea>
+      </div>
+    </div>
+    <div id="settings-footer">
+      <div id="settings-error"></div>
+      <div id="settings-actions">
+        <button class="s-btn" id="settings-discard">Discard</button>
+        <button class="s-btn primary" id="settings-save">Save</button>
+      </div>
+    </div>
+  </div>
 </div>
 
 <!-- ── Help overlay (outside #app for true full-screen) ── -->
@@ -419,6 +629,10 @@ body {
       <span class="help-keys"><span class="help-key">r</span></span>
       <span class="help-desc">refresh listings</span>
     </div>
+    <div class="help-row">
+      <span class="help-keys"><span class="help-key">p</span></span>
+      <span class="help-desc">open personalization settings</span>
+    </div>
 
     <div class="help-section">General</div>
     <div class="help-row">
@@ -427,7 +641,7 @@ body {
     </div>
     <div class="help-row">
       <span class="help-keys"><span class="help-key">Esc</span></span>
-      <span class="help-desc">close overlay · back to list · blur search</span>
+      <span class="help-desc">close / back / dismiss</span>
     </div>
   </div>
 </div>
@@ -444,6 +658,190 @@ let PAGE_SIZE = 20;
 let resizeTimer = null;
 let updatedAt = null;
 let selectedIdx = -1;
+let hasPersona = false;
+let hasFilter = false;
+let _settingsOriginalPersona = '';
+let _settingsOriginalFilter = '';
+let personaEditor = null;
+
+// ── Settings helpers ──
+
+function updateRelevanceSortState() {
+  const el = document.querySelector('.sort-opt[data-sort="relevance"]');
+  if (!el) return;
+  const enabled = hasPersona || hasFilter;
+  el.classList.toggle('disabled', !enabled);
+  if (!enabled && currentSort === 'relevance') {
+    currentSort = 'new';
+    document.querySelectorAll('.sort-opt').forEach(s => {
+      s.classList.toggle('active', s.dataset.sort === currentSort);
+    });
+    renderList();
+  }
+}
+
+function openSettings() {
+  document.getElementById('settings-error').textContent = '';
+  document.getElementById('settings-save').textContent = 'Save';
+  document.getElementById('settings-save').disabled = false;
+  document.getElementById('filter-input').value = '';
+  _settingsOriginalPersona = '';
+  _settingsOriginalFilter = '';
+
+  document.getElementById('settings-overlay').classList.add('visible');
+
+  // Init CodeMirror once after the overlay is in the DOM and visible
+  if (!personaEditor) {
+    personaEditor = CodeMirror.fromTextArea(document.getElementById('persona-input'), {
+      mode: 'markdown',
+      lineNumbers: false,
+      lineWrapping: true,
+      indentWithTabs: false,
+      extraKeys: { 'Esc': closeSettings },
+    });
+  }
+  // Force layout recalc now that the panel is visible
+  requestAnimationFrame(() => personaEditor.refresh());
+
+  fetch('/persona.md')
+    .then(r => r.status === 204 ? '' : r.text())
+    .then(text => {
+      personaEditor.setValue(text || '');
+      personaEditor.clearHistory();
+      _settingsOriginalPersona = text || '';
+    })
+    .catch(() => {});
+
+  fetch('/filter.json')
+    .then(r => r.json())
+    .then(data => {
+      const nl = data.natural_language || '';
+      document.getElementById('filter-input').value = nl;
+      _settingsOriginalFilter = nl;
+    })
+    .catch(() => {});
+}
+
+function closeSettings() {
+  document.getElementById('settings-overlay').classList.remove('visible');
+}
+
+function handleScoringStream(reader) {
+  const scoreErrorEl = document.getElementById('score-error');
+  const updatedAtEl  = document.getElementById('updated-at');
+  const decoder = new TextDecoder();
+  let buffer = '';
+
+  function processLine(line) {
+    if (!line.startsWith('data:')) return;
+    const msg = line.slice(5);
+    if (msg.startsWith('scoring_start:')) {
+      scoreErrorEl.textContent = '';
+      updatedAtEl.textContent = 'scoring ' + msg.slice(14) + ' jobs…';
+    } else if (msg.startsWith('scoring:')) {
+      const parts = msg.slice(8).split(':');
+      const pct = Math.round(parseInt(parts[0], 10) / parseInt(parts[1], 10) * 100);
+      updatedAtEl.textContent = 'scoring… ' + pct + '%';
+    } else if (msg.startsWith('scoring_done:')) {
+      const parts = msg.slice(13).split('/');
+      updatedAtEl.textContent = 'scored ' + parts[0] + ' of ' + parts[1] + ' jobs';
+      setTimeout(reloadJobs, 500);
+    } else if (msg.startsWith('scoring_skip:')) {
+      const reason = msg.slice(13);
+      const silent = reason.startsWith('all jobs already scored') ||
+                     reason.startsWith('persona not configured') ||
+                     reason.startsWith('persona cleared');
+      if (!silent) {
+        scoreErrorEl.textContent = 'Scoring issue: ' + reason;
+      }
+    }
+  }
+
+  function read() {
+    reader.read().then(({done, value}) => {
+      if (done) { reloadJobs(); return; }
+      buffer += decoder.decode(value, {stream: true});
+      const lines = buffer.split('\n');
+      buffer = lines.pop();
+      lines.forEach(processLine);
+      read();
+    }).catch(() => {});
+  }
+  read();
+}
+
+function reloadJobs() {
+  fetch('/data.json')
+    .then(r => r.json())
+    .then(data => {
+      allJobs = Array.isArray(data) ? data : (data.jobs || []);
+      updatedAt = data.updated || null;
+      const searchEl = document.getElementById('search');
+      filtered = applySearch(searchEl ? searchEl.value.trim() : '');
+      selectedIdx = -1;
+      currentPage = 1;
+      renderUpdatedAt();
+      renderList();
+    })
+    .catch(() => {});
+}
+
+async function saveSettings() {
+  const personaText  = personaEditor ? personaEditor.getValue() : document.getElementById('persona-input').value;
+  const filterText   = document.getElementById('filter-input').value.trim();
+  const saveBtn      = document.getElementById('settings-save');
+  const errorEl      = document.getElementById('settings-error');
+  const filterChanged  = filterText  !== _settingsOriginalFilter;
+  const personaChanged = personaText !== _settingsOriginalPersona;
+
+  if (!filterChanged && !personaChanged) { closeSettings(); return; }
+
+  saveBtn.textContent = 'Saving…';
+  saveBtn.disabled = true;
+  errorEl.textContent = '';
+
+  // Save filter first (may fail with validation error)
+  if (filterChanged) {
+    try {
+      const resp = await fetch('/filter.json', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({natural_language: filterText}),
+      });
+      const result = await resp.json();
+      if (!resp.ok) {
+        errorEl.textContent = result.message || 'Failed to save filter.';
+        saveBtn.textContent = 'Save';
+        saveBtn.disabled = false;
+        return;
+      }
+      hasFilter = !!result.pandas_query;
+    } catch (e) {
+      errorEl.textContent = 'Network error saving filter.';
+      saveBtn.textContent = 'Save';
+      saveBtn.disabled = false;
+      return;
+    }
+  }
+
+  // Close modal — persona save / scoring continues in background
+  closeSettings();
+  updateRelevanceSortState();
+
+  if (personaChanged) {
+    hasPersona = !!personaText.trim();
+    updateRelevanceSortState();
+    fetch('/persona.md', {
+      method: 'POST',
+      headers: {'Content-Type': 'text/plain'},
+      body: personaText,
+    }).then(r => handleScoringStream(r.body.getReader()))
+      .catch(e => { document.getElementById('score-error').textContent = 'Error: ' + e.message; });
+  }
+
+  // Reload data with the updated filter / reset scores
+  reloadJobs();
+}
 
 function parseGrade(raw) {
   if (!raw) return null;
@@ -751,19 +1149,23 @@ document.addEventListener('keydown', function(e) {
   const inDetail = document.getElementById('view-detail').style.display === 'block';
   const helpOpen = document.getElementById('help-overlay').classList.contains('visible');
 
-  // ? — always
-  if (e.key === '?') { toggleHelp(); return; }
+  const settingsOpen = document.getElementById('settings-overlay').classList.contains('visible');
+
+  // ? — always (but not when settings is open)
+  if (e.key === '?' && !settingsOpen) { toggleHelp(); return; }
 
   // Escape — layered
   if (e.key === 'Escape') {
-    if (helpOpen)   { closeHelp(); return; }
-    if (inDetail)   { history.back(); return; }
-    if (inInput)    { document.activeElement.blur(); return; }
+    if (settingsOpen) { closeSettings(); return; }
+    if (helpOpen)     { closeHelp(); return; }
+    if (inDetail)     { history.back(); return; }
+    if (inInput)      { document.activeElement.blur(); return; }
     return;
   }
 
-  // Any other key closes help
-  if (helpOpen) { closeHelp(); return; }
+  // Any other key closes help (but not when settings is open)
+  if (helpOpen && !settingsOpen) { closeHelp(); return; }
+  if (settingsOpen) return;
 
   // Suppress shortcuts when typing
   if (inInput) return;
@@ -858,6 +1260,9 @@ document.addEventListener('keydown', function(e) {
     case 'r':
       document.getElementById('updated-at').click();
       break;
+    case 'p':
+      openSettings();
+      break;
   }
 });
 
@@ -887,6 +1292,15 @@ function init() {
   document.getElementById('detail-back').addEventListener('click', function(e) {
     e.preventDefault();
     history.back();
+  });
+
+  // Settings gear button
+  document.getElementById('settings-btn').addEventListener('click', openSettings);
+  document.getElementById('settings-close').addEventListener('click', closeSettings);
+  document.getElementById('settings-discard').addEventListener('click', closeSettings);
+  document.getElementById('settings-save').addEventListener('click', saveSettings);
+  document.getElementById('settings-overlay').addEventListener('click', function(e) {
+    if (e.target === this) closeSettings();
   });
 
   // Help overlay — click backdrop to close
@@ -956,36 +1370,52 @@ function init() {
     }, 150);
   });
 
-  fetch('/data.json')
+  // Load config and data in parallel; config gates the initial sort choice
+  const configP = fetch('/api/config').then(r => r.json()).catch(() => ({}));
+  const dataP   = fetch('/data.json')
     .then(r => {
-      if (r.status === 404) throw Object.assign(new Error(), { noData: true });
+      if (r.status === 404) return {_noData: true};
       if (!r.ok) throw new Error('HTTP ' + r.status);
-      return r.json();
+      return r.json().then(d => ({...d, _ok: true}));
     })
-    .then(data => {
-      allJobs = Array.isArray(data) ? data : (data.jobs || []);
-      updatedAt = data.updated || null;
-      filtered = allJobs.slice();
-      renderUpdatedAt();
-      PAGE_SIZE = 50;
-      renderList();
-      requestAnimationFrame(function() {
-        calculatePageSize();
-        selectedIdx = 0;
-        renderList();
-        applySelection();
+    .catch(() => ({_error: true}));
+
+  Promise.all([configP, dataP]).then(function([cfg, data]) {
+    hasPersona = cfg.has_persona || false;
+    hasFilter  = cfg.has_filter  || false;
+    if (!hasPersona && !hasFilter) {
+      currentSort = 'new';
+      document.querySelectorAll('.sort-opt').forEach(el => {
+        el.classList.toggle('active', el.dataset.sort === currentSort);
       });
-    })
-    .catch(err => {
-      if (err.noData) {
-        document.getElementById('list').innerHTML = '<div id="status">no listings yet.</div>';
-        renderUpdatedAt();
-        document.getElementById('updated-at').click();
-      } else {
-        document.getElementById('list').innerHTML = '<div id="status">could not load listings.</div>';
-        renderUpdatedAt();
-      }
+    }
+    updateRelevanceSortState();
+
+    if (data._noData) {
+      document.getElementById('list').innerHTML = '<div id="status">no listings yet.</div>';
+      renderUpdatedAt();
+      document.getElementById('updated-at').click();
+      return;
+    }
+    if (data._error) {
+      document.getElementById('list').innerHTML = '<div id="status">could not load listings.</div>';
+      renderUpdatedAt();
+      return;
+    }
+
+    allJobs  = Array.isArray(data) ? data : (data.jobs || []);
+    updatedAt = data.updated || null;
+    filtered  = allJobs.slice();
+    renderUpdatedAt();
+    PAGE_SIZE = 50;
+    renderList();
+    requestAnimationFrame(function() {
+      calculatePageSize();
+      selectedIdx = 0;
+      renderList();
+      applySelection();
     });
+  });
 
   // Refresh
   document.getElementById('updated-at').addEventListener('click', function() {
@@ -1000,6 +1430,7 @@ function init() {
         const decoder = new TextDecoder();
         let buffer = '';
 
+        const scoreErrEl = document.getElementById('score-error');
         function processLine(line) {
           if (!line.startsWith('data:')) return;
           const msg = line.slice(5);
@@ -1011,16 +1442,23 @@ function init() {
           } else if (msg.startsWith('done:')) {
             el.textContent = msg.slice(5);
           } else if (msg.startsWith('scoring_start:')) {
-            const n = msg.slice(14);
-            el.textContent = 'scoring ' + n + ' jobs…';
+            scoreErrEl.textContent = '';
+            el.textContent = 'scoring ' + msg.slice(14) + ' jobs…';
           } else if (msg.startsWith('scoring:')) {
             const parts = msg.slice(8).split(':');
-            el.textContent = 'scoring… ' + parts[0] + '/' + parts[1];
+            const pct = Math.round(parseInt(parts[0], 10) / parseInt(parts[1], 10) * 100);
+            el.textContent = 'scoring… ' + pct + '% completed';
           } else if (msg.startsWith('scoring_done:')) {
             const parts = msg.slice(13).split('/');
             el.textContent = 'scored ' + parts[0] + ' of ' + parts[1] + ' jobs';
           } else if (msg.startsWith('scoring_skip:')) {
-            console.warn('[scoring]', msg.slice(13));
+            const reason = msg.slice(13);
+            console.warn('[scoring]', reason);
+            const silent = reason.startsWith('all jobs already scored') ||
+                           reason.startsWith('persona not configured');
+            if (!silent) {
+              scoreErrEl.textContent = 'Scoring issue: ' + reason;
+            }
           } else if (msg.startsWith('warning:')) {
             console.warn('[refresh]', msg.slice(8));
           }
