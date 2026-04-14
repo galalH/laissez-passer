@@ -45,11 +45,20 @@ def _fetch_detail(url, session):
         soup = BeautifulSoup(resp.content, "html.parser")
 
         lines = [l.strip() for l in soup.get_text("\n").split("\n") if l.strip()]
-        grade = None
+        contract_level = ics_level = None
         for i, line in enumerate(lines):
-            if line.lower() == "contract level" and i + 1 < len(lines):
-                grade = lines[i + 1]
+            if i + 1 >= len(lines):
                 break
+            low = line.lower()
+            if low == "contract level":
+                contract_level = lines[i + 1]
+            elif low == "ics level":
+                ics_level = lines[i + 1]
+
+        if contract_level and ics_level:
+            grade = f"{contract_level} ({ics_level})"
+        else:
+            grade = contract_level or None
 
         html_parts = []
         in_range = False

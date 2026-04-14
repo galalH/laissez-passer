@@ -45,7 +45,6 @@ GRADE_MAP.update({f"PR{n}": (f"P-{n}", "Director") for n in range(6, 8)})
 
 # D-series
 GRADE_MAP.update(_p(range(1, 3), "D", "Director"))
-GRADE_MAP["ADG"] = ("ADG", "Director")
 
 # IP P-series and IP D-series (UNOPS) — mapped to standard grades
 GRADE_MAP.update({f"IP P-{n}": (f"P-{n}", "Professional") for n in range(1, 6)})
@@ -75,48 +74,41 @@ GRADE_MAP.update({f"ISA-P{n}": (f"P-{n}", "Director") for n in range(6, 8)})
 GRADE_MAP.update({f"ISA-NO{ch}": (f"NO-{ch}", "National Officer") for ch in "ABCDE"})
 GRADE_MAP["ISA -G3"] = ("G-3", "General Service")  # data artifact with space
 
-# SC/SB-series (Service Contract)
-GRADE_MAP.update(_p(range(1, 12), "SC", "Service Contract"))
+# SC-N (UNESCO style) → SC L-N
+for n in range(1, 12):
+    GRADE_MAP[f"SC-{n}"] = (f"SC L-{n}", "Service Contract")
+    GRADE_MAP[f"SC{n}"] = (f"SC L-{n}", "Service Contract")
+
+# SB-series (Service Contract)
 GRADE_MAP.update(_p(range(1, 6), "SB", "Service Contract"))
 
-# NPP / PSA (FAO non-staff contract types)
-GRADE_MAP["NPP"] = ("NPP", "Service Contract")
-GRADE_MAP["PSA"] = ("PSA", "Service Contract")
+# NPP / PSA (FAO) → SC L-UNK
+GRADE_MAP["NPP"] = ("SC L-UNK", "Service Contract")
+GRADE_MAP["PSA"] = ("SC L-UNK", "Service Contract")
 
-# WFP-specific grades from Management_Level facet
+# WFP SC L-N and SSA L-N
 for n in range(1, 12):
-    GRADE_MAP[f"SC L{n}"] = (f"SC L{n}", "Service Contract")
-    GRADE_MAP[f"SSA L{n}"] = (f"SSA L{n}", "Service Contract")
-GRADE_MAP["CST"] = ("CST", "Consultant")
+    GRADE_MAP[f"SC L{n}"] = (f"SC L-{n}", "Service Contract")
+    GRADE_MAP[f"SSA L{n}"] = (f"SC L-{n}", "Service Contract")
+GRADE_MAP["CST"] = ("CONS", "Consultant")
 GRADE_MAP["VO"] = ("VOL", "Volunteer")
 GRADE_MAP["Volunteer"] = ("VOL", "Volunteer")
 GRADE_MAP["Volunteer Programme"] = ("VOL", "Volunteer")
-GRADE_MAP["INT"] = ("INT", "Internship")
+GRADE_MAP["INT"] = ("INTERN", "Internship")
 
-# TC (DOS service contract)
-for n in (4, 6, 7):
-    GRADE_MAP[f"TC-{n}"] = (f"TC-{n}", "Service Contract")
-    GRADE_MAP[f"TC{n}"] = (f"TC-{n}", "Service Contract")
-
-# LSC-series (Service Contract)
-GRADE_MAP.update(_p(range(1, 8), "LSC", "Service Contract"))
+# LSC-N → SC L-N
+for n in range(1, 8):
+    GRADE_MAP[f"LSC-{n}"] = (f"SC L-{n}", "Service Contract")
+    GRADE_MAP[f"LSC{n}"] = (f"SC L-{n}", "Service Contract")
 
 # Consultant
-for raw, norm in [
-    ("CON", "CON"),
-    ("Consultant", "CON"),
-    ("Consultant/Individual Contractor", "CON"),
-    ("Consultant / PSA (Personal Services Agreement)", "CON"),
-    ("Consultant / PSA", "CON"),
-    ("C-1", "C-1"),
-    ("C1", "C-1"),
-    ("C-2", "C-2"),
-    ("C2", "C-2"),
-]:
-    GRADE_MAP[raw] = (norm, "Consultant")
-GRADE_MAP["Level 1 - Junior"] = ("Level 1", "Consultant")
-GRADE_MAP["Level 2 - Middle"] = ("Level 2", "Consultant")
-GRADE_MAP["Level 3 - Senior"] = ("Level 3", "Consultant")
+for raw in (
+    "CON", "Consultant", "Consultant/Individual Contractor",
+    "Consultant / PSA (Personal Services Agreement)", "Consultant / PSA",
+    "C-1", "C1", "C-2", "C2",
+    "Level 1 - Junior", "Level 2 - Middle", "Level 3 - Senior",
+):
+    GRADE_MAP[raw] = ("CONS", "Consultant")
 
 # World Bank: GA-GD=GS, GE-GH=Professional, GI-GK=Director, EC/ET=Consultant
 _WB_CAT = {
@@ -127,9 +119,9 @@ _WB_CAT = {
 for code, cat in _WB_CAT.items():
     GRADE_MAP[code] = (code, cat)
 for n in range(1, 5):
-    GRADE_MAP[f"EC{n}"] = (f"EC{n}", "Consultant")
+    GRADE_MAP[f"EC{n}"] = ("CONS", "Consultant")
 for n in range(1, 5):
-    GRADE_MAP[f"ET{n}"] = (f"ET{n}", "Service Contract")
+    GRADE_MAP[f"ET{n}"] = ("SC L-UNK", "Service Contract")
 
 # IMF: A01-A08=GS, A09-A15=Professional, B01-B05=Director
 GRADE_MAP.update({f"A{n:02d}": (f"A{n:02d}", "General Service") for n in range(1, 9)})
@@ -142,23 +134,23 @@ for raw in (
     "Internships/fellowships", "Trainee",
     "Affiliate/Internship > Hire", "Internship Programme", "I-1", "IN",
 ):
-    GRADE_MAP[raw] = ("INT", "Internship")
+    GRADE_MAP[raw] = ("INTERN", "Internship")
 
-# UNDP NPSA/IPSA (Personal Services Agreement)
+# UNDP NPSA → SC L-N; IPSA → SC I-N
 for n in range(1, 12):
-    GRADE_MAP[f"NPSA-{n}"] = (f"NPSA-{n}", "Service Contract")
+    GRADE_MAP[f"NPSA-{n}"] = (f"SC L-{n}", "Service Contract")
 for n in range(8, 15):
-    GRADE_MAP[f"IPSA-{n}"] = (f"IPSA-{n}", "Service Contract")
+    GRADE_MAP[f"IPSA-{n}"] = (f"SC I-{n}", "Service Contract")
 
-# UNOPS LICA/IICA (Personal Services Agreement)
+# UNOPS LICA → SC L-N; IICA with ICS level handled by regex in normalize_grade
 for n in range(1, 12):
-    GRADE_MAP[f"LICA {n}"] = (f"LICA {n}", "Service Contract")
+    GRADE_MAP[f"LICA {n}"] = (f"SC L-{n}", "Service Contract")
 for n in range(1, 5):
-    GRADE_MAP[f"IICA {n}"] = (f"IICA {n}", "Service Contract")
+    GRADE_MAP[f"IICA {n}"] = ("SC I-UNK", "Service Contract")  # fallback if no ICS level
 
-# UNU PSA (Personal Services Agreement)
-GRADE_MAP["PSA-3"] = ("PSA-3", "Service Contract")
-GRADE_MAP["PSA-4"] = ("PSA-4", "Service Contract")
+# UNU PSA → SC L-UNK
+GRADE_MAP["PSA-3"] = ("SC L-UNK", "Service Contract")
+GRADE_MAP["PSA-4"] = ("SC L-UNK", "Service Contract")
 
 # UN Tourism
 for raw in (
@@ -166,12 +158,6 @@ for raw in (
     "II/5B", "III/3A", "Not applicable", "To be determined",
 ):
     GRADE_MAP[raw] = (raw, "UN Tourism")
-
-GRADE_MAP["Fellows Programme"] = ("UG", "Other")
-
-# Explicit Other / unresolvable
-for raw in ("NA", "Other", "G level", "UG", "NB5", "E", "L2"):
-    GRADE_MAP[raw] = (None if raw in ("NA", "Other") else raw, "Other")
 
 
 # ---------------------------------------------------------------------------
@@ -188,26 +174,23 @@ _TITLE_CONSULTANT = re.compile(
     re.IGNORECASE,
 )
 _TITLE_VOLUNTEER = re.compile(r"\bvolunteer\b", re.IGNORECASE)
-_TITLE_VISITING_PROF = re.compile(r"\bvisiting\s+professional\b", re.IGNORECASE)
 _TITLE_ROSTER = re.compile(r"\broster\b", re.IGNORECASE)
 
 
-def _classify_by_title(title: str, agency: str = "") -> tuple[str | None, str | None]:
+def _classify_by_title(title: str) -> tuple[str | None, str | None]:
     """
-    Last-resort classification based on job title keywords.
-    Returns (grade, category) when a signal is found, or (None, 'Other') otherwise.
+    Classification based on job title keywords.
+    Returns (grade, category) when a signal is found, or (None, None) otherwise.
     """
     if _TITLE_INTERNSHIP.search(title):
-        return "INT", "Internship"
+        return "INTERN", "Internship"
     if _TITLE_CONSULTANT.search(title):
-        return "CON", "Consultant"
+        return "CONS", "Consultant"
     if _TITLE_VOLUNTEER.search(title):
         return "VOL", "Volunteer"
-    if agency == "ICC" and _TITLE_VISITING_PROF.search(title):
-        return "UG", "Visiting Professional"
     if _TITLE_ROSTER.search(title):
-        return "UG", "Roster"
-    return None, "Other"
+        return "OTHER", "Roster"
+    return None, None
 
 
 # ---------------------------------------------------------------------------
@@ -222,29 +205,35 @@ def normalize_grade(
 ) -> tuple[str | None, str | None]:
     """
     Return (normalized_grade, grade_category).
-    Falls back to title-keyword matching for ungraded positions.
-    Raises ValueError for unrecognized grade codes.
+    Falls back to title-keyword matching when grade is missing or unrecognized.
+    Unclassified grade and category both default to "OTHER" / "Other".
     """
     if not raw or not raw.strip():
-        return _classify_by_title(title, agency)
+        if title:
+            grade, category = _classify_by_title(title)
+            if category is not None:
+                return grade, category
+        return "OTHER", "Other"
 
     s = raw.strip()
 
+    # UNOPS IICA N (ICS NN) format — extract ICS level as the SC I level
+    m = re.match(r"^IICA \d+ \(ICS (\d+)\)$", s)
+    if m:
+        return f"SC I-{int(m.group(1))}", "Service Contract"
+
     if s in GRADE_MAP:
         grade, category = GRADE_MAP[s]
-        if category in ("Other", "UN Tourism") and title:
-            title_grade, title_cat = _classify_by_title(title, agency)
-            if title_cat != "Other":
+        if category == "UN Tourism" and title:
+            title_grade, title_cat = _classify_by_title(title)
+            if title_cat is not None:
                 return title_grade, title_cat
         return grade, category
 
-    # Unknown grade code — try title before giving up
+    # Unrecognized grade — try title before falling back
     if title:
-        title_grade, title_cat = _classify_by_title(title, agency)
-        if title_cat != "Other":
-            return title_grade, title_cat
+        grade, category = _classify_by_title(title)
+        if category is not None:
+            return grade, category
 
-    if agency == "UNRWA":
-        return s, "UNRWA Area Staff"
-
-    raise ValueError(f"unclassified grade {s!r}")
+    return "OTHER", "Other"
