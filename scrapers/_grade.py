@@ -86,10 +86,10 @@ GRADE_MAP.update(_p(range(1, 6), "SB", "Service Contract"))
 GRADE_MAP["NPP"] = ("SC L-UNK", "Service Contract")
 GRADE_MAP["PSA"] = ("SC L-UNK", "Service Contract")
 
-# WFP SC L-N and SSA L-N
+# WFP SC and SSA — used for both local and international, level unknown
 for n in range(1, 12):
-    GRADE_MAP[f"SC L{n}"] = (f"SC L-{n}", "Service Contract")
-    GRADE_MAP[f"SSA L{n}"] = (f"SC L-{n}", "Service Contract")
+    GRADE_MAP[f"SC L{n}"] = ("SC UNK", "Service Contract")
+    GRADE_MAP[f"SSA L{n}"] = ("SC UNK", "Service Contract")
 GRADE_MAP["CST"] = ("CONS", "Consultant")
 GRADE_MAP["VO"] = ("VOL", "Volunteer")
 GRADE_MAP["Volunteer"] = ("VOL", "Volunteer")
