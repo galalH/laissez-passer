@@ -6,9 +6,11 @@ import io
 import json
 import logging
 import os
+import queue
 import random
 import re
 import sys
+import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
@@ -54,7 +56,7 @@ def _load_duty_stations() -> dict[str, tuple[str, str]]:
     counts = df.groupby("DS")["COUNTRY"].nunique()
     unambiguous = counts[counts == 1].index
     df = df[df["DS"].isin(unambiguous)].drop_duplicates("DS")
-    return {row["DS"].lower(): (row["DS"], row["COUNTRY"]) for _, row in df.iterrows()}
+    return {ds.lower(): (ds, country) for ds, country in zip(df["DS"], df["COUNTRY"])}
 
 
 _DS_LOOKUP = _load_duty_stations()
@@ -116,7 +118,7 @@ def _normalize_location(
             return ds
 
         cc = _cc.convert(cleaned, to="name_short", not_found=None)
-        if cc and cc.lower() in _CC_COUNTRY_NAMES:
+        if cc:
             return None, cc
 
         city = cleaned
@@ -329,7 +331,7 @@ def score_new_jobs(all_jobs: list, progress=print, jobs_to_score: list | None = 
         source = jobs_to_score if jobs_to_score is not None else all_jobs
 
         to_score = [
-            (i, job) for i, job in enumerate(source)
+            (job.get("url") or str(i), job) for i, job in enumerate(source)
             if job.get("score") is None
         ]
 
@@ -345,21 +347,21 @@ def score_new_jobs(all_jobs: list, progress=print, jobs_to_score: list | None = 
         _BATCH_TOKEN_TARGET = int(2_000_000 * 0.8)  # 1.6 M tokens per batch
         _FIXED_PER_REQ = (len(persona) // 4) + 100 + 64 + 50
 
-        requests: list[tuple[int, dict, str]] = [
-            (idx, job, _build_score_message(job)) for idx, job in to_score
+        requests: list[tuple[str, dict, str]] = [
+            (job_id, job, _build_score_message(job)) for job_id, job in to_score
         ]
 
-        batches: list[list[tuple[int, dict, str]]] = []
-        current: list[tuple[int, dict, str]] = []
+        batches: list[list[tuple[str, dict, str]]] = []
+        current: list[tuple[str, dict, str]] = []
         current_tokens = 0
-        for idx, job, user_msg in requests:
+        for job_id, job, user_msg in requests:
             tokens = _FIXED_PER_REQ + len(user_msg) // 4
             if current and current_tokens + tokens > _BATCH_TOKEN_TARGET:
                 batches.append(current)
-                current = [(idx, job, user_msg)]
+                current = [(job_id, job, user_msg)]
                 current_tokens = tokens
             else:
-                current.append((idx, job, user_msg))
+                current.append((job_id, job, user_msg))
                 current_tokens += tokens
         if current:
             batches.append(current)
@@ -368,13 +370,13 @@ def score_new_jobs(all_jobs: list, progress=print, jobs_to_score: list | None = 
 
         # ── Process batches sequentially: submit → wait → collect → next ──────
         _TERMINAL = {"completed", "failed", "expired", "cancelled"}
-        scores: dict[int, float | None] = {}
+        scores: dict[str, float | None] = {}
         jobs_done = 0  # cumulative across completed batches
 
         for batch_requests in batches:
             lines = [
                 json.dumps({
-                    "custom_id": str(idx),
+                    "custom_id": job_id,
                     "method": "POST",
                     "url": "/v1/chat/completions",
                     "body": {
@@ -388,7 +390,7 @@ def score_new_jobs(all_jobs: list, progress=print, jobs_to_score: list | None = 
                         ],
                     },
                 })
-                for idx, _job, user_msg in batch_requests
+                for job_id, _job, user_msg in batch_requests
             ]
             batch_file = client.files.create(
                 file=("score.jsonl", io.BytesIO("\n".join(lines).encode()), "application/jsonl"),
@@ -416,8 +418,8 @@ def score_new_jobs(all_jobs: list, progress=print, jobs_to_score: list | None = 
 
             jobs_done += len(batch_requests)
 
-        for idx, job in to_score:
-            job["score"] = scores.get(idx)
+        for job_id, job in to_score:
+            job["score"] = scores.get(job_id)
 
         # Reload to get the updated timestamp written by scrape(), then write scores back
         try:
@@ -437,12 +439,12 @@ def score_new_jobs(all_jobs: list, progress=print, jobs_to_score: list | None = 
         progress(f"scoring_skip:scoring failed ({e})")
 
 
-def _parse_batch_scores(result_text: str) -> dict[int, float | None]:
+def _parse_batch_scores(result_text: str) -> dict[str, float | None]:
     """Parse OpenAI batch output JSONL into {custom_id -> score}."""
-    scores: dict[int, float | None] = {}
+    scores: dict[str, float | None] = {}
     for line in result_text.strip().splitlines():
         row = json.loads(line)
-        idx = int(row["custom_id"])
+        idx = row["custom_id"]
         if row.get("error"):
             scores[idx] = None
             continue
@@ -516,16 +518,17 @@ def _resume_scoring(progress) -> bool:
             if still_active:
                 time.sleep(10)
 
-        all_scores: dict[int, float | None] = {}
+        all_scores: dict[str, float | None] = {}
         for b in batch_objs.values():
             if b.status != "completed":
                 progress(f"scoring_skip:batch ended with status {b.status}")
                 continue
             all_scores.update(_parse_batch_scores(client.files.content(b.output_file_id).text))
 
-        for i, job in enumerate(source):
-            if i in all_scores:
-                job["score"] = all_scores[i]
+        for job in all_jobs:
+            url = job.get("url")
+            if url and url in all_scores:
+                job["score"] = all_scores[url]
 
         try:
             with DATA_FILE.open() as f:
@@ -715,9 +718,6 @@ def get_persona():
 
 @app.route("/persona.md", methods=["POST"])
 def save_persona_route():
-    import queue
-    import threading
-
     text = request.get_data(as_text=True)
     _PERSONA_FILE.write_text(text)
 
@@ -854,9 +854,6 @@ def refresh():
 
 def _scrape_lines():
     """Run scrape() then score_new_jobs(), yielding progress lines as they're emitted."""
-    import queue
-    import threading
-
     q = queue.Queue()
 
     def progress(msg):
