@@ -302,15 +302,19 @@ def _build_score_message(job: dict) -> str:
     )
 
 
-def score_new_jobs(all_jobs: list, progress=print) -> None:
-    """Score jobs that are missing a score using GPT-5.4-nano via OpenAI Batch API."""
+def score_new_jobs(all_jobs: list, progress=print, jobs_to_score: list | None = None) -> None:
+    """Score jobs that are missing a score using GPT-5.4-nano via OpenAI Batch API.
+
+    all_jobs is the full list written back to disk.  jobs_to_score is the subset
+    that should be scored (must be references into all_jobs); defaults to all_jobs.
+    """
     api_key = os.environ.get("OPENAI_API_KEY")
     if not api_key:
         progress("scoring_skip:no OPENAI_API_KEY — skipping scoring")
         return
 
-    if not _PERSONA_FILE.exists():
-        progress("scoring_skip:persona file not found — skipping scoring")
+    if not _PERSONA_FILE.exists() or not _PERSONA_FILE.read_text().strip():
+        progress("scoring_skip:persona not configured — skipping scoring")
         return
 
     try:
@@ -321,10 +325,10 @@ def score_new_jobs(all_jobs: list, progress=print) -> None:
 
     try:
         persona = _PERSONA_FILE.read_text().strip()
-        grade_prefixes = ("IICA", "IPSA", "EC")
+        source = jobs_to_score if jobs_to_score is not None else all_jobs
 
         to_score = [
-            (i, job) for i, job in enumerate(all_jobs)
+            (i, job) for i, job in enumerate(source)
             if job.get("score") is None
         ]
 
@@ -332,76 +336,84 @@ def score_new_jobs(all_jobs: list, progress=print) -> None:
             progress("scoring_skip:all jobs already scored")
             return
 
-        progress(f"scoring_start:{len(to_score)}")
-
         client = openai.OpenAI(api_key=api_key, max_retries=0)
 
-        lines = [
-            json.dumps({
-                "custom_id": str(idx),
-                "method": "POST",
-                "url": "/v1/chat/completions",
-                "body": {
-                    "model": "gpt-5.4-nano",
-                    "max_completion_tokens": 64,
-                    "tools": [_SCORE_TOOL],
-                    "tool_choice": _SCORE_TOOL_CHOICE,
-                    "messages": [
-                        {"role": "system", "content": persona},
-                        {"role": "user", "content": _build_score_message(job)},
-                    ],
-                },
-            })
-            for idx, job in to_score
+        # ── Split into token-capped batches ───────────────────────────────────
+        # Rough estimate: 1 token ≈ 4 chars.  Each request costs:
+        #   persona (fixed) + tool definition (~100 tok) + user message + 64 output + ~50 overhead
+        _BATCH_TOKEN_TARGET = int(2_000_000 * 0.8)  # 1.6 M tokens per batch
+        _FIXED_PER_REQ = (len(persona) // 4) + 100 + 64 + 50
+
+        requests: list[tuple[int, dict, str]] = [
+            (idx, job, _build_score_message(job)) for idx, job in to_score
         ]
-        jsonl_bytes = "\n".join(lines).encode()
 
-        batch_file = client.files.create(
-            file=("score.jsonl", io.BytesIO(jsonl_bytes), "application/jsonl"),
-            purpose="batch",
-        )
-        batch = client.batches.create(
-            input_file_id=batch_file.id,
-            endpoint="/v1/chat/completions",
-            completion_window="24h",
-        )
-        batch_id = batch.id
-        started_at = time.monotonic()
-
-        while True:
-            batch = client.batches.retrieve(batch_id)
-            counts = batch.request_counts
-            elapsed = int(time.monotonic() - started_at)
-            progress(f"scoring:{counts.completed}/{counts.total}:{elapsed}")
-            if batch.status in ("completed", "failed", "expired", "cancelled"):
-                break
-            time.sleep(10)
-
-        if batch.status != "completed":
-            progress(f"scoring_skip:batch ended with status {batch.status}")
-            return
-
-        result_text = client.files.content(batch.output_file_id).text
-        scores: dict[int, float | None] = {}
-        for line in result_text.strip().splitlines():
-            row = json.loads(line)
-            idx = int(row["custom_id"])
-            error = row.get("error")
-            if error:
-                scores[idx] = None
+        batches: list[list[tuple[int, dict, str]]] = []
+        current: list[tuple[int, dict, str]] = []
+        current_tokens = 0
+        for idx, job, user_msg in requests:
+            tokens = _FIXED_PER_REQ + len(user_msg) // 4
+            if current and current_tokens + tokens > _BATCH_TOKEN_TARGET:
+                batches.append(current)
+                current = [(idx, job, user_msg)]
+                current_tokens = tokens
             else:
-                tool_calls = row["response"]["body"]["choices"][0]["message"].get("tool_calls", [])
-                score = None
-                for tc in tool_calls:
-                    name = tc["function"]["name"] if isinstance(tc, dict) else tc.function.name
-                    args = tc["function"]["arguments"] if isinstance(tc, dict) else tc.function.arguments
-                    if name == "record_score":
-                        try:
-                            score = float(json.loads(args)["score"])
-                        except (KeyError, TypeError, ValueError, json.JSONDecodeError):
-                            pass
-                        break
-                scores[idx] = score
+                current.append((idx, job, user_msg))
+                current_tokens += tokens
+        if current:
+            batches.append(current)
+
+        progress(f"scoring_start:{len(to_score)}")
+
+        # ── Process batches sequentially: submit → wait → collect → next ──────
+        _TERMINAL = {"completed", "failed", "expired", "cancelled"}
+        scores: dict[int, float | None] = {}
+        jobs_done = 0  # cumulative across completed batches
+
+        for batch_requests in batches:
+            lines = [
+                json.dumps({
+                    "custom_id": str(idx),
+                    "method": "POST",
+                    "url": "/v1/chat/completions",
+                    "body": {
+                        "model": "gpt-5.4-nano",
+                        "max_completion_tokens": 64,
+                        "tools": [_SCORE_TOOL],
+                        "tool_choice": _SCORE_TOOL_CHOICE,
+                        "messages": [
+                            {"role": "system", "content": persona},
+                            {"role": "user", "content": user_msg},
+                        ],
+                    },
+                })
+                for idx, _job, user_msg in batch_requests
+            ]
+            batch_file = client.files.create(
+                file=("score.jsonl", io.BytesIO("\n".join(lines).encode()), "application/jsonl"),
+                purpose="batch",
+            )
+            batch = client.batches.create(
+                input_file_id=batch_file.id,
+                endpoint="/v1/chat/completions",
+                completion_window="24h",
+            )
+
+            started_at = time.monotonic()
+            while batch.status not in _TERMINAL:
+                time.sleep(10)
+                batch = client.batches.retrieve(batch.id)
+                elapsed = int(time.monotonic() - started_at)
+                progress(f"scoring:{jobs_done + batch.request_counts.completed}:{len(to_score)}:{elapsed}")
+
+            if batch.status != "completed":
+                progress(f"scoring_skip:batch ended with status {batch.status}")
+            else:
+                scores.update(_parse_batch_scores(
+                    client.files.content(batch.output_file_id).text
+                ))
+
+            jobs_done += len(batch_requests)
 
         for idx, job in to_score:
             job["score"] = scores.get(idx)
@@ -422,6 +434,114 @@ def score_new_jobs(all_jobs: list, progress=print) -> None:
 
     except Exception as e:
         progress(f"scoring_skip:scoring failed ({e})")
+
+
+def _parse_batch_scores(result_text: str) -> dict[int, float | None]:
+    """Parse OpenAI batch output JSONL into {custom_id -> score}."""
+    scores: dict[int, float | None] = {}
+    for line in result_text.strip().splitlines():
+        row = json.loads(line)
+        idx = int(row["custom_id"])
+        if row.get("error"):
+            scores[idx] = None
+            continue
+        tool_calls = row["response"]["body"]["choices"][0]["message"].get("tool_calls", [])
+        score = None
+        for tc in tool_calls:
+            name = tc["function"]["name"] if isinstance(tc, dict) else tc.function.name
+            args = tc["function"]["arguments"] if isinstance(tc, dict) else tc.function.arguments
+            if name == "record_score":
+                try:
+                    score = float(json.loads(args)["score"])
+                except (KeyError, TypeError, ValueError, json.JSONDecodeError):
+                    pass
+                break
+        scores[idx] = score
+    return scores
+
+
+def _resume_scoring(progress) -> bool:
+    """Check for active OpenAI batches and poll them to completion.
+
+    Returns True if active batches were found (caller should skip scraping),
+    False if there is nothing in flight.
+    """
+    api_key = os.environ.get("OPENAI_API_KEY")
+    if not api_key:
+        return False
+
+    try:
+        import openai
+    except ImportError:
+        return False
+
+    try:
+        client = openai.OpenAI(api_key=api_key, max_retries=0)
+
+        _ACTIVE    = {"validating", "in_progress", "finalizing"}
+        _TERMINAL  = {"completed", "failed", "expired", "cancelled"}
+
+        active_batches = [b for b in client.batches.list() if b.status in _ACTIVE]
+        if not active_batches:
+            return False
+
+        if not DATA_FILE.exists():
+            return False
+
+        with open(DATA_FILE) as f:
+            payload = json.load(f)
+        all_jobs = payload.get("jobs", [])
+        total = sum(1 for job in all_jobs if job.get("score") is None)
+
+        if not total:
+            return False
+
+        progress(f"scoring_start:{total}")
+
+        batch_objs = {b.id: b for b in active_batches}
+        still_active = set(batch_objs)
+        started_at = time.monotonic()
+
+        while still_active:
+            for bid in list(still_active):
+                b = client.batches.retrieve(bid)
+                batch_objs[bid] = b
+                if b.status in _TERMINAL:
+                    still_active.discard(bid)
+            total_completed = sum(b.request_counts.completed for b in batch_objs.values())
+            elapsed = int(time.monotonic() - started_at)
+            progress(f"scoring:{total_completed}:{total}:{elapsed}")
+            if still_active:
+                time.sleep(10)
+
+        all_scores: dict[int, float | None] = {}
+        for b in batch_objs.values():
+            if b.status != "completed":
+                progress(f"scoring_skip:batch ended with status {b.status}")
+                continue
+            all_scores.update(_parse_batch_scores(client.files.content(b.output_file_id).text))
+
+        for i, job in enumerate(all_jobs):
+            if i in all_scores:
+                job["score"] = all_scores[i]
+
+        try:
+            with DATA_FILE.open() as f:
+                existing = json.load(f)
+            updated = existing.get("updated", "")
+        except Exception:
+            updated = ""
+        with DATA_FILE.open("w") as f:
+            json.dump({"updated": updated, "jobs": all_jobs}, f,
+                      ensure_ascii=False, separators=(",", ":"))
+
+        n_scored = sum(1 for s in all_scores.values() if s is not None)
+        progress(f"scoring_done:{n_scored}/{total}")
+        return True
+
+    except Exception as e:
+        progress(f"scoring_skip:scoring failed during resume ({e})")
+        return False
 
 
 # ---------------------------------------------------------------------------
@@ -464,8 +584,9 @@ def _scrape_lines():
 
     def run():
         try:
-            all_jobs = scrape(progress=progress)
-            score_new_jobs(all_jobs, progress=progress)
+            if not _resume_scoring(progress):
+                all_jobs = scrape(progress=progress)
+                score_new_jobs(all_jobs, progress=progress)
         finally:
             q.put(None)  # sentinel
 
