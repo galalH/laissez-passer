@@ -1,0 +1,1 @@
+{"natural_language": "Professional jobs outside Egypt, or National Officer positions in Egypt, or international service contracts.", "pandas_query": "(grade_category in [\"Professional\"] and country_iso3 != \"EGY\") or (grade_category in [\"National Officer\"] and country_iso3 == \"EGY\") or (grade_category == \"Service Contract\" and grade.str.startswith(\"SC I-\"))"}

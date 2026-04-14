@@ -25,6 +25,8 @@ Open [http://localhost:5000](http://localhost:5000).
 
 Click **Refresh** in the UI or `POST /refresh` to trigger a live scrape. Progress streams in real time and output is saved to `static/data.json`.
 
+A sample `static/persona.md` and `static/filter.json` are included in the repo for illustration — they reflect a data professional's profile and a filter that surfaces Professional roles outside Egypt, National Officer roles in Egypt, and international service contracts. Replace them with your own.
+
 ## Relevance scoring (optional)
 
 After each scrape, jobs can be automatically scored for relevance using OpenAI's `gpt-5.4-nano` model via the Batch API. Set your API key to enable it:
