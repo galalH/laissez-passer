@@ -1,8 +1,26 @@
 """Shared utilities for scrapers."""
 
 import io
+import json
 import re as _re
+from pathlib import Path
 from markitdown import MarkItDown
+
+_DATA_FILE = Path(__file__).parent.parent / "static" / "data.json"
+
+
+def load_cached_jobs() -> dict[str, dict]:
+    """Return existing jobs from data.json keyed by URL.
+
+    Used by scrapers to skip detail HTTP requests for jobs already on disk.
+    """
+    try:
+        with open(_DATA_FILE) as f:
+            payload = json.load(f)
+        jobs = payload.get("jobs", payload) if isinstance(payload, dict) else payload
+        return {job["url"]: job for job in jobs if job.get("url")}
+    except Exception:
+        return {}
 
 _md = MarkItDown()
 

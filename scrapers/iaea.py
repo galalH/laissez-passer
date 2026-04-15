@@ -6,7 +6,7 @@ import re
 from urllib.parse import quote, unquote
 from concurrent.futures import ThreadPoolExecutor
 
-from scrapers._utils import html_to_md, trim
+from scrapers._utils import html_to_md, trim, load_cached_jobs
 
 AGENCY = "IAEA"
 AGENCY_NAME = "International Atomic Energy Agency"
@@ -179,10 +179,16 @@ def scrape() -> list[dict]:
 
         page_no += 1
 
-    with ThreadPoolExecutor(max_workers=10) as ex:
-        futures = [(s, ex.submit(fetch_detail, session, s["url"])) for s in stubs]
-
+    cache = load_cached_jobs()
+    futures = []
     jobs = []
+    with ThreadPoolExecutor(max_workers=10) as ex:
+        for s in stubs:
+            if s["url"] in cache:
+                c = cache[s["url"]]
+                jobs.append({**s, "deadline": c.get("deadline"), "pubdate": c.get("pubdate"), "description": c.get("description")})
+            else:
+                futures.append((s, ex.submit(fetch_detail, session, s["url"])))
     for stub, fut in futures:
         deadline, pubdate, description = fut.result()
         jobs.append({**stub, "deadline": deadline, "pubdate": pubdate, "description": description})

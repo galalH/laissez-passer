@@ -4,7 +4,7 @@ from concurrent.futures import ThreadPoolExecutor
 from typing import Optional
 from bs4 import BeautifulSoup
 
-from scrapers._utils import html_to_md, trim
+from scrapers._utils import html_to_md, trim, load_cached_jobs
 
 AGENCY = "UNDP"
 AGENCY_NAME = "United Nations Development Programme"
@@ -116,9 +116,18 @@ def scrape() -> list[dict]:
         except Exception:
             continue
 
+    cache = load_cached_jobs()
+    futures = []
     with ThreadPoolExecutor(max_workers=10) as ex:
-        futures = [ex.submit(_fetch_description, session, s['url']) for s in stubs]
-    for stub, fut in zip(stubs, futures):
+        for s in stubs:
+            if s['url'] in cache:
+                c = cache[s['url']]
+                s['description'] = c.get('description')
+                s['pubdate'] = c.get('pubdate')
+                jobs.append(s)
+            else:
+                futures.append((s, ex.submit(_fetch_description, session, s['url'])))
+    for stub, fut in futures:
         description, pubdate = fut.result()
         stub['description'] = description
         stub['pubdate'] = pubdate

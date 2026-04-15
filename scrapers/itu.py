@@ -6,7 +6,7 @@ import re
 from dateutil import parser as dateutil_parser
 from concurrent.futures import ThreadPoolExecutor
 
-from scrapers._utils import html_to_md, trim
+from scrapers._utils import html_to_md, trim, load_cached_jobs
 
 AGENCY = "ITU"
 AGENCY_NAME = "International Telecommunication Union"
@@ -168,10 +168,22 @@ def scrape() -> list[dict]:
         seen_urls.add(url)
         unique_jobs.append(job)
 
-    with ThreadPoolExecutor(max_workers=10) as ex:
-        futures = [(job, ex.submit(_get_job_details, job["url"], session)) for job in unique_jobs]
-
+    cache = load_cached_jobs()
+    futures = []
     results = []
+    with ThreadPoolExecutor(max_workers=10) as ex:
+        for job in unique_jobs:
+            if job["url"] in cache:
+                c = cache[job["url"]]
+                results.append({
+                    "agency": AGENCY, "agency_name": AGENCY_NAME,
+                    "job_title": job["job_title"], "grade": c.get("grade"),
+                    "city": job["city"], "country": job["country"],
+                    "deadline": c.get("deadline"), "pubdate": c.get("pubdate"),
+                    "url": job["url"], "description": c.get("description"),
+                })
+            else:
+                futures.append((job, ex.submit(_get_job_details, job["url"], session)))
     for job, fut in futures:
         grade, deadline, pubdate, description = fut.result()
         results.append({

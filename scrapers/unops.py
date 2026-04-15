@@ -7,7 +7,7 @@ import json
 from urllib.parse import urljoin
 from concurrent.futures import ThreadPoolExecutor
 
-from scrapers._utils import html_to_md, trim
+from scrapers._utils import html_to_md, trim, load_cached_jobs
 
 AGENCY = "UNOPS"
 AGENCY_NAME = "United Nations Office for Project Services"
@@ -153,10 +153,16 @@ def scrape() -> list[dict]:
             break
         offset += records_per_page
 
-    with ThreadPoolExecutor(max_workers=10) as ex:
-        futures = [(s, ex.submit(_fetch_detail, s["url"], session)) for s in stubs]
-
+    cache = load_cached_jobs()
+    futures = []
     jobs = []
+    with ThreadPoolExecutor(max_workers=10) as ex:
+        for s in stubs:
+            if s["url"] in cache:
+                c = cache[s["url"]]
+                jobs.append({**s, "grade": c.get("grade"), "pubdate": c.get("pubdate"), "description": c.get("description")})
+            else:
+                futures.append((s, ex.submit(_fetch_detail, s["url"], session)))
     for stub, fut in futures:
         grade, pubdate, description = fut.result()
         jobs.append({**stub, "grade": grade, "pubdate": pubdate, "description": description})

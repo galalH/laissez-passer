@@ -6,7 +6,7 @@ import requests
 from bs4 import BeautifulSoup
 from concurrent.futures import ThreadPoolExecutor
 
-from scrapers._utils import html_to_md, trim
+from scrapers._utils import html_to_md, trim, load_cached_jobs
 
 AGENCY = "CTBTO"
 AGENCY_NAME = "Preparatory Commission for the Comprehensive Nuclear-Test-Ban Treaty Organization"
@@ -146,19 +146,31 @@ def scrape() -> list[dict]:
 
     raw_jobs = parse_dwr_jobs(resp.text)
 
-    with ThreadPoolExecutor(max_workers=10) as ex:
-        futures = [(item, ex.submit(fetch_detail, session, item["id"])) for item in raw_jobs]
-
+    cache = load_cached_jobs()
+    futures = []
     jobs = []
-    for item, fut in futures:
+    with ThreadPoolExecutor(max_workers=10) as ex:
+        for item in raw_jobs:
+            url = f"{DETAIL_BASE}{item['id']}"
+            if url in cache:
+                c = cache[url]
+                jobs.append({
+                    "agency": AGENCY, "agency_name": AGENCY_NAME,
+                    "job_title": item["title"], "grade": c.get("grade"),
+                    "city": "Vienna", "country": "Austria",
+                    "deadline": c.get("deadline"),
+                    "url": url, "description": c.get("description"),
+                })
+            else:
+                futures.append((item, url, ex.submit(fetch_detail, session, item["id"])))
+    for item, url, fut in futures:
         grade, deadline, description = fut.result()
         jobs.append({
             "agency": AGENCY, "agency_name": AGENCY_NAME,
             "job_title": item["title"], "grade": grade,
             "city": "Vienna", "country": "Austria",
             "deadline": deadline,
-            "url": f"{DETAIL_BASE}{item['id']}",
-            "description": description,
+            "url": url, "description": description,
         })
     return jobs
 

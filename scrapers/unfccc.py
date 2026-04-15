@@ -8,7 +8,7 @@ from concurrent.futures import ThreadPoolExecutor
 from bs4 import BeautifulSoup
 from playwright.sync_api import sync_playwright
 
-from scrapers._utils import pdf_to_md, trim
+from scrapers._utils import pdf_to_md, trim, load_cached_jobs
 
 AGENCY = "UNFCCC"
 AGENCY_NAME = "United Nations Framework Convention on Climate Change"
@@ -152,10 +152,18 @@ def scrape() -> list[dict]:
                 "deadline": deadline, "pubdate": pubdate, "url": job_url,
             })
 
+    cache = load_cached_jobs()
+    futures = []
+    results = []
     with ThreadPoolExecutor(max_workers=10) as ex:
-        futures = [(s, ex.submit(_fetch_description, cookie_dict, s["url"])) for s in stubs]
-
-    return [{**stub, "description": fut.result()} for stub, fut in futures]  # pubdate already in stub
+        for s in stubs:
+            if s["url"] in cache:
+                results.append({**s, "description": cache[s["url"]].get("description")})
+            else:
+                futures.append((s, ex.submit(_fetch_description, cookie_dict, s["url"])))
+    for stub, fut in futures:
+        results.append({**stub, "description": fut.result()})
+    return results  # pubdate already in stub
 
 
 if __name__ == "__main__":

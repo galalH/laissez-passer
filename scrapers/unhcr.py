@@ -5,7 +5,7 @@ import requests
 import json
 from concurrent.futures import ThreadPoolExecutor
 
-from scrapers._utils import html_to_md, trim
+from scrapers._utils import html_to_md, trim, load_cached_jobs
 
 AGENCY = "UNHCR"
 AGENCY_NAME = "United Nations High Commissioner for Refugees"
@@ -93,10 +93,20 @@ def scrape() -> list[dict]:
         except Exception:
             break
 
-    with ThreadPoolExecutor(max_workers=10) as ex:
-        futures = [(s, ex.submit(_fetch_detail, s.pop("_path"))) for s in stubs]
-
+    cache = load_cached_jobs()
+    futures = []
     jobs = []
+    with ThreadPoolExecutor(max_workers=10) as ex:
+        for s in stubs:
+            path = s.pop("_path")
+            if s["url"] in cache:
+                c = cache[s["url"]]
+                s["deadline"] = c.get("deadline")
+                s["pubdate"] = c.get("pubdate")
+                s["description"] = c.get("description")
+                jobs.append(s)
+            else:
+                futures.append((s, ex.submit(_fetch_detail, path)))
     for stub, fut in futures:
         deadline, pubdate, description = fut.result()
         stub["deadline"] = deadline

@@ -5,7 +5,7 @@ import re
 from dateutil import parser as dateutil_parser
 from concurrent.futures import ThreadPoolExecutor
 
-from scrapers._utils import html_to_md, trim
+from scrapers._utils import html_to_md, trim, load_cached_jobs
 
 AGENCY = "UNESCO"
 AGENCY_NAME = "United Nations Educational Scientific and Cultural Organization"
@@ -163,10 +163,16 @@ def scrape() -> list[dict]:
         if offset >= total:
             break
 
-    with ThreadPoolExecutor(max_workers=10) as ex:
-        futures = [(s, ex.submit(_fetch_description, session, s["url"])) for s in stubs]
-
+    cache = load_cached_jobs()
+    futures = []
     jobs = []
+    with ThreadPoolExecutor(max_workers=10) as ex:
+        for s in stubs:
+            if s["url"] in cache:
+                c = cache[s["url"]]
+                jobs.append({**s, "pubdate": c.get("pubdate"), "description": c.get("description")})
+            else:
+                futures.append((s, ex.submit(_fetch_description, session, s["url"])))
     for stub, fut in futures:
         description, pubdate = fut.result()
         jobs.append({**stub, "pubdate": pubdate, "description": description})

@@ -4,7 +4,7 @@ import re
 import requests
 from concurrent.futures import ThreadPoolExecutor
 
-from scrapers._utils import html_to_md, trim
+from scrapers._utils import html_to_md, trim, load_cached_jobs
 
 AGENCY = "UN Women"
 AGENCY_NAME = "United Nations Entity for Gender Equality and the Empowerment of Women"
@@ -123,10 +123,18 @@ def scrape() -> list[dict]:
             break
         offset += PAGE_SIZE
 
-    with ThreadPoolExecutor(max_workers=10) as ex:
-        futures = [(s, ex.submit(_fetch_detail, session, s.pop("_id"))) for s in stubs]
-
+    cache = load_cached_jobs()
+    futures = []
     jobs = []
+    with ThreadPoolExecutor(max_workers=10) as ex:
+        for s in stubs:
+            job_id = s.pop("_id")
+            if s["url"] in cache:
+                c = cache[s["url"]]
+                jobs.append({**s, "grade": c.get("grade"), "deadline": c.get("deadline"),
+                             "pubdate": c.get("pubdate"), "description": c.get("description")})
+            else:
+                futures.append((s, ex.submit(_fetch_detail, session, job_id)))
     for stub, fut in futures:
         grade, deadline, pubdate, description = fut.result()
         if grade is None:

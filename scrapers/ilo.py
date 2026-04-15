@@ -5,7 +5,7 @@ import requests
 from bs4 import BeautifulSoup
 from concurrent.futures import ThreadPoolExecutor
 
-from scrapers._utils import html_to_md, trim
+from scrapers._utils import html_to_md, trim, load_cached_jobs
 
 AGENCY = "ILO"
 AGENCY_NAME = "International Labour Organization"
@@ -179,10 +179,20 @@ def scrape() -> list:
 
         page += 1
 
+    cache = load_cached_jobs()
+    futures = []
+    results = []
     with ThreadPoolExecutor(max_workers=10) as ex:
-        futures = [(s, ex.submit(_fetch_description, session, s["url"])) for s in stubs]
-
-    return [{**stub, "description": desc, "pubdate": pubdate} for stub, (desc, pubdate) in futures]
+        for s in stubs:
+            if s["url"] in cache:
+                c = cache[s["url"]]
+                results.append({**s, "description": c.get("description"), "pubdate": c.get("pubdate")})
+            else:
+                futures.append((s, ex.submit(_fetch_description, session, s["url"])))
+    for stub, fut in futures:
+        desc, pubdate = fut.result()
+        results.append({**stub, "description": desc, "pubdate": pubdate})
+    return results
 
 
 if __name__ == "__main__":

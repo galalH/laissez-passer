@@ -4,7 +4,7 @@ import requests
 import json
 from concurrent.futures import ThreadPoolExecutor
 
-from scrapers._utils import html_to_md, trim
+from scrapers._utils import html_to_md, trim, load_cached_jobs
 
 AGENCY = "WFP"
 AGENCY_NAME = "World Food Programme"
@@ -112,10 +112,20 @@ def scrape() -> list[dict]:
     for descriptor, grade_id in grade_facets:
         all_stubs.extend(_collect_stubs_for_grade(session, descriptor, grade_id))
 
-    with ThreadPoolExecutor(max_workers=10) as ex:
-        futures = [(s, ex.submit(_fetch_detail, session, s.pop("_path"))) for s in all_stubs]
-
+    cache = load_cached_jobs()
+    futures = []
     jobs = []
+    with ThreadPoolExecutor(max_workers=10) as ex:
+        for s in all_stubs:
+            path = s.pop("_path")
+            if s["url"] in cache:
+                c = cache[s["url"]]
+                s["deadline"] = c.get("deadline")
+                s["pubdate"] = c.get("pubdate")
+                s["description"] = c.get("description")
+                jobs.append(s)
+            else:
+                futures.append((s, ex.submit(_fetch_detail, session, path)))
     for stub, fut in futures:
         deadline, pubdate, description = fut.result()
         stub["deadline"] = deadline

@@ -6,7 +6,7 @@ import re
 from bs4 import BeautifulSoup
 from concurrent.futures import ThreadPoolExecutor
 
-from scrapers._utils import html_to_md, trim
+from scrapers._utils import html_to_md, trim, load_cached_jobs
 
 AGENCY = "World Bank"
 AGENCY_NAME = "World Bank Group"
@@ -154,10 +154,19 @@ def scrape() -> list[dict]:
             break
         page += 1
 
-    with ThreadPoolExecutor(max_workers=10) as ex:
-        futures = [(s, ex.submit(_fetch_detail, session, s.pop("_id"))) for s in stubs]
-
+    cache = load_cached_jobs()
+    futures = []
     jobs = []
+    with ThreadPoolExecutor(max_workers=10) as ex:
+        for s in stubs:
+            req_id = s.pop("_id")
+            if s["url"] in cache:
+                c = cache[s["url"]]
+                jobs.append({**s, "grade": c.get("grade"), "city": c.get("city"),
+                             "country": c.get("country"), "deadline": c.get("deadline"),
+                             "description": c.get("description")})
+            else:
+                futures.append((s, ex.submit(_fetch_detail, session, req_id)))
     for stub, fut in futures:
         grade, city, country, deadline, description = fut.result()
         jobs.append({**stub, "grade": grade, "city": city, "country": country,

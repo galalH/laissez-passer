@@ -5,7 +5,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 import re
 from datetime import datetime
-from scrapers._utils import html_to_md, trim
+from scrapers._utils import html_to_md, trim, load_cached_jobs
 
 AGENCY = "UNIDO"
 AGENCY_NAME = "United Nations Industrial Development Organization"
@@ -120,10 +120,16 @@ def scrape() -> list[dict]:
     except Exception:
         pass
 
-    with ThreadPoolExecutor(max_workers=10) as ex:
-        futures = [(s, ex.submit(_fetch_description, session, s["url"])) for s in stubs]
-
+    cache = load_cached_jobs()
+    futures = []
     jobs = []
+    with ThreadPoolExecutor(max_workers=10) as ex:
+        for s in stubs:
+            if s["url"] in cache:
+                c = cache[s["url"]]
+                jobs.append({**s, "pubdate": c.get("pubdate"), "description": c.get("description")})
+            else:
+                futures.append((s, ex.submit(_fetch_description, session, s["url"])))
     for stub, fut in futures:
         description, pubdate = fut.result()
         jobs.append({**stub, "pubdate": pubdate, "description": description})
