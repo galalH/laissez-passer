@@ -67,6 +67,8 @@ def scrape() -> list[dict]:
         closing = item.findtext(f"{{{JOB_NS}}}closingDate") or ""
         deadline = _parse_closing_date(closing)
 
+        pubdate = _parse_closing_date(item.findtext("pubDate") or "")
+
         grade_m = GRADE_RE.search(title)
         grade = re.sub(r'\s+', '-', grade_m.group(1).upper()) if grade_m else None
 
@@ -101,6 +103,7 @@ def scrape() -> list[dict]:
             "city": city,
             "country": country,
             "deadline": deadline,
+            "pubdate": pubdate,
             "url": url,
             "description": description,
         })

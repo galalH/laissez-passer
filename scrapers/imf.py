@@ -43,7 +43,10 @@ def _fetch_detail(session, external_path):
     try:
         url = f"https://imf.wd5.myworkdayjobs.com/wday/cxs/imf/IMF{external_path}"
         data = session.get(url, headers=HEADERS, timeout=30).json()
-        desc_html = data.get("jobPostingInfo", {}).get("jobDescription", "")
+        info = data.get("jobPostingInfo", {})
+        desc_html = info.get("jobDescription", "")
+        start_date = info.get("startDate")
+        pubdate = start_date[:10] if start_date else None
         # Plain text needed for grade regex; markdown used for description
         plain = BeautifulSoup(desc_html, "html.parser").get_text(separator="\n", strip=True)
         description = trim(
@@ -53,13 +56,13 @@ def _fetch_detail(session, external_path):
         )
         m = re.search(r'Hiring For[:\s]*\n(.+)', plain)
         if not m:
-            return None, description
+            return None, pubdate, description
         grade = m.group(1).strip()
         if "," in grade:
             grade = grade.split(",")[-1].strip()
-        return grade, description
+        return grade, pubdate, description
     except Exception:
-        return None, None
+        return None, None, None
 
 
 def scrape() -> list[dict]:
@@ -108,8 +111,8 @@ def scrape() -> list[dict]:
 
     jobs = []
     for stub, fut in futures:
-        grade, description = fut.result()
-        jobs.append({**stub, "grade": grade, "description": description})
+        grade, pubdate, description = fut.result()
+        jobs.append({**stub, "grade": grade, "pubdate": pubdate, "description": description})
     return jobs
 
 

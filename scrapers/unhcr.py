@@ -37,15 +37,17 @@ def _fetch_detail(external_path):
         info = detail.json().get("jobPostingInfo", {})
         end_date = info.get("endDate")
         deadline = end_date[:10] if end_date else None
+        start_date = info.get("startDate")
+        pubdate = start_date[:10] if start_date else None
         description = html_to_md(info.get("jobDescription") or "")
         description = trim(
             description,
             before=[re.compile(r"Terms of Reference\**"), re.compile(r"Standard Job Description\**")],
             after=re.compile(r"\**\s*UNHCR Salary Calculator"),
         )
-        return deadline, description
+        return deadline, pubdate, description
     except Exception:
-        return None, None
+        return None, None, None
 
 
 def scrape() -> list[dict]:
@@ -96,8 +98,9 @@ def scrape() -> list[dict]:
 
     jobs = []
     for stub, fut in futures:
-        deadline, description = fut.result()
+        deadline, pubdate, description = fut.result()
         stub["deadline"] = deadline
+        stub["pubdate"] = pubdate
         stub["description"] = description
         jobs.append(stub)
     return jobs

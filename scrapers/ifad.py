@@ -147,6 +147,9 @@ def _parse_jobs(html):
                 deadline_raw = d
         deadline = _parse_deadline(deadline_raw)
 
+        opened_el = soup.find("span", id=f"SCH_OPENED${i}")
+        pubdate = _parse_deadline(opened_el.get_text(strip=True) if opened_el else None)
+
         url = JOBS_URL
 
         jobs.append({
@@ -157,6 +160,7 @@ def _parse_jobs(html):
             "city": location,
             "country": None,
             "deadline": deadline,
+            "pubdate": pubdate,
             "url": url,
         })
         i += 1

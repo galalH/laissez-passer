@@ -13,6 +13,24 @@ JOBS_URL = "https://www.unfpa.org/jobs"
 
 from urllib.parse import urljoin
 
+_ORACLE_BASE = "https://estm.fa.em2.oraclecloud.com"
+_DETAIL_API = f"{_ORACLE_BASE}/hcmRestApi/resources/latest/recruitingCEJobRequisitionDetails"
+
+
+def _fetch_pubdate(session: requests.Session, job_id: str) -> str | None:
+    try:
+        params = {
+            "expand": "all", "onlyData": "true",
+            "finder": f'ById;Id="{job_id}",siteNumber=CX_1',
+        }
+        resp = session.get(_DETAIL_API, params=params, timeout=30)
+        resp.raise_for_status()
+        item = (resp.json().get("items") or [{}])[0]
+        start = item.get("ExternalPostedStartDate") or None
+        return start[:10] if start else None
+    except Exception:
+        return None
+
 
 def _collect_links_from_page(soup):
     """Extract job URLs from the paginated current-jobs view-content section."""
@@ -86,6 +104,9 @@ def scrape() -> list[dict]:
             job_title = extract_job_title(job_soup)
             if not job_title:
                 return None
+            fields = _get_form_fields(job_soup)
+            job_id = fields.get('job id') or None
+            pubdate = _fetch_pubdate(session, job_id) if job_id else None
             return {
                 'agency': AGENCY, 'agency_name': AGENCY_NAME,
                 'job_title': job_title,
@@ -93,6 +114,7 @@ def scrape() -> list[dict]:
                 'city': extract_location(job_soup)[0],
                 'country': extract_location(job_soup)[1],
                 'deadline': extract_deadline(job_soup),
+                'pubdate': pubdate,
                 'url': job_url,
                 'description': extract_description(job_soup),
             }

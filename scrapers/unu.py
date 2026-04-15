@@ -80,6 +80,8 @@ def scrape() -> list[dict]:
             html_desc = str(third_h3) + "".join(str(s) for s in third_h3.next_siblings)
         description = html_to_md(html_desc)
 
+        pubdate = (o.get("published_at") or "")[:10] or None
+
         jobs.append({
             "agency": AGENCY,
             "agency_name": AGENCY_NAME,
@@ -88,6 +90,7 @@ def scrape() -> list[dict]:
             "city": city,
             "country": country,
             "deadline": deadline,
+            "pubdate": pubdate,
             "url": url,
             "description": description,
         })

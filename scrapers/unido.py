@@ -4,6 +4,7 @@ from bs4 import BeautifulSoup
 from concurrent.futures import ThreadPoolExecutor
 
 import re
+from datetime import datetime
 from scrapers._utils import html_to_md, trim
 
 AGENCY = "UNIDO"
@@ -53,21 +54,29 @@ def _split_location(s):
     return s.strip(), None
 
 
-def _fetch_description(session, job_url: str) -> str | None:
+def _fetch_description(session, job_url: str) -> tuple[str | None, str | None]:
     try:
         resp = session.get(job_url, timeout=20)
         resp.raise_for_status()
-        el = BeautifulSoup(resp.content, "html.parser").find(class_="jobdescription")
-        if not el:
-            return None
-        return trim(
-            html_to_md(str(el)),
+        soup = BeautifulSoup(resp.content, "html.parser")
+        pubdate = None
+        tag = soup.find(attrs={"itemprop": "datePosted"})
+        if tag:
+            raw = tag.get("content", "")
+            try:
+                pubdate = datetime.strptime(raw, "%a %b %d %H:%M:%S %Z %Y").strftime("%Y-%m-%d")
+            except Exception:
+                pass
+        el = soup.find(class_="jobdescription")
+        description = trim(
+            html_to_md(str(el)) if el else None,
             start=re.compile(r"\*+ORGANIZATIONAL CONTEXT", re.IGNORECASE),
             before="Such core functions are carried out in Divisions/Offices in its Headquarters, Sub-regional Offices and Country Offices.",
             after=re.compile(r"\n[^\n]*?\*+[^*\n]*competencies[^*\n]*\*+", re.IGNORECASE),
         )
+        return description, pubdate
     except Exception:
-        return None
+        return None, None
 
 
 def scrape() -> list[dict]:
@@ -114,7 +123,11 @@ def scrape() -> list[dict]:
     with ThreadPoolExecutor(max_workers=10) as ex:
         futures = [(s, ex.submit(_fetch_description, session, s["url"])) for s in stubs]
 
-    return [{**stub, "description": fut.result()} for stub, fut in futures]
+    jobs = []
+    for stub, fut in futures:
+        description, pubdate = fut.result()
+        jobs.append({**stub, "pubdate": pubdate, "description": description})
+    return jobs
 
 
 if __name__ == "__main__":

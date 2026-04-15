@@ -25,7 +25,10 @@ def _fetch_detail(session, external_path):
     try:
         detail = session.get(f"{DETAIL_BASE}{external_path}", headers=HEADERS, timeout=30)
         detail.raise_for_status()
-        desc_html = detail.json().get("jobPostingInfo", {}).get("jobDescription", "")
+        info = detail.json().get("jobPostingInfo", {})
+        start_date = info.get("startDate")
+        pubdate = start_date[:10] if start_date else None
+        desc_html = info.get("jobDescription", "")
         description = html_to_md(desc_html)
         _PREAMBLE_END = "are particularly encouraged for all positions.\n\n"
         if description and _PREAMBLE_END in description:
@@ -33,9 +36,9 @@ def _fetch_detail(session, external_path):
             if description.startswith(".\n"):
                 description = description.lstrip(".\n").strip() or None
         description = trim(description, after=re.compile(r"\**\s*Additional Information"))
-        return description
+        return description, pubdate
     except Exception:
-        return None
+        return None, None
 
 
 def _parse_deadline(s):
@@ -95,7 +98,9 @@ def scrape() -> list[dict]:
 
     jobs = []
     for stub, fut in futures:
-        stub["description"] = fut.result()
+        description, pubdate = fut.result()
+        stub["description"] = description
+        stub["pubdate"] = pubdate
         jobs.append(stub)
     return jobs
 

@@ -19,19 +19,31 @@ HEADERS = {
 }
 
 
-def _fetch_description(session: requests.Session, job_url: str) -> str | None:
+def _fetch_description(session: requests.Session, job_url: str) -> tuple[str | None, str | None]:
     try:
         resp = session.get(job_url, timeout=20)
         resp.raise_for_status()
         soup = BeautifulSoup(resp.text, "html.parser")
+
+        pubdate = None
+        meta_desc = soup.find("meta", {"name": "Description"})
+        if meta_desc:
+            m = re.search(r"Date:\s*(\d{1,2}/\d{1,2}/\d{4})", meta_desc.get("content", ""))
+            if m:
+                day, month, year = m.group(1).split("/")
+                pubdate = f"{year}-{month.zfill(2)}-{day.zfill(2)}"
+
+        description = None
         details = soup.find("div", class_="ts-offer-page__content-details")
         if details:
             span = details.find("span")
             if span:
-                return trim(html_to_md(str(span)), start="### Job Summary", after="Additional Information")
+                description = trim(html_to_md(str(span)), start="### Job Summary", after="Additional Information")
+
+        return description, pubdate
     except Exception:
         pass
-    return None
+    return None, None
 
 
 def _extract_grade(job_title):
@@ -95,7 +107,11 @@ def scrape() -> list[dict]:
     with ThreadPoolExecutor(max_workers=10) as ex:
         futures = [(s, ex.submit(_fetch_description, session, s["url"])) for s in stubs]
 
-    return [{**stub, "description": fut.result()} for stub, fut in futures]
+    results = []
+    for stub, fut in futures:
+        description, pubdate = fut.result()
+        results.append({**stub, "pubdate": pubdate, "description": description})
+    return results
 
 
 if __name__ == "__main__":

@@ -145,8 +145,10 @@ def scrape() -> list[dict]:
                 continue
 
             job_url = f"https://worldbankgroup.csod.com/ux/ats/careersite/1/home/requisition/{req_id}?c=worldbankgroup"
+            pubdate_raw = req.get("postingEffectiveDate", "")
+            pubdate = _parse_deadline(pubdate_raw) if pubdate_raw else None
             stubs.append({"_id": req_id, "agency": AGENCY, "agency_name": AGENCY_NAME,
-                          "job_title": job_title, "url": job_url})
+                          "job_title": job_title, "url": job_url, "pubdate": pubdate})
 
         if len(stubs) >= total or len(requisitions) < page_size:
             break

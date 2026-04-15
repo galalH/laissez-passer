@@ -50,21 +50,37 @@ HEADERS = {
 }
 
 
-def _fetch_description(session: requests.Session, job_url: str) -> str | None:
+def _fetch_description(session: requests.Session, job_url: str) -> tuple[str | None, str | None]:
     try:
         resp = session.get(job_url, timeout=30)
         resp.raise_for_status()
         soup = BeautifulSoup(resp.content, "html.parser")
+
+        pubdate = None
+        for span in soup.find_all("span", class_="sections"):
+            if span.get_text(strip=True) == "Date:":
+                sibling = span.next_sibling
+                if sibling:
+                    m = re.search(r"(\d{1,2}\s+\w+\s+\d{4})", sibling.strip())
+                    if m:
+                        try:
+                            from datetime import datetime
+                            dt = datetime.strptime(m.group(1), "%d %B %Y")
+                            pubdate = dt.strftime("%Y-%m-%d")
+                        except Exception:
+                            pass
+                break
+
         tds = [td for td in soup.find_all("td") if len(td.get_text(strip=True)) > 200]
         if not tds:
-            return None
+            return None, pubdate
         best = max(tds, key=lambda td: len(td.get_text(strip=True)))
         description = html_to_md(str(best))
         if description:
             description = _strip_table_markup(description)
-        return description
+        return description, pubdate
     except Exception:
-        return None
+        return None, None
 
 
 def parse_closing_date(closing_date_str: Optional[str]) -> Optional[str]:
@@ -261,7 +277,7 @@ def scrape() -> list[dict]:
     with ThreadPoolExecutor(max_workers=10) as ex:
         futures = [(s, ex.submit(_fetch_description, session, s["url"])) for s in stubs]
 
-    return [{**stub, "description": fut.result()} for stub, fut in futures]
+    return [{**stub, "description": desc, "pubdate": pubdate} for stub, (desc, pubdate) in futures]
 
 
 if __name__ == "__main__":

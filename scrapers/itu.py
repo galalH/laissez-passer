@@ -49,12 +49,13 @@ def _split_location(s):
 
 
 def _get_job_details(job_url, session):
-    """Fetch grade, deadline, and description from vacancy notice page."""
+    """Fetch grade, deadline, pubdate and description from vacancy notice page."""
     try:
         resp = session.get(job_url, timeout=20)
         resp.raise_for_status()
         soup = BeautifulSoup(resp.text, "html.parser")
         text = soup.get_text(separator="\n", strip=True)
+        html = resp.text
 
         grade = None
         m = re.search(r'Grade:\s*\n\s*(\S+)', text)
@@ -75,13 +76,24 @@ def _get_job_details(job_url, session):
             except Exception:
                 deadline = raw
 
+        pubdate = None
+        mp = re.search(r'itemprop="datePosted"\s+content="([^"]+)"', html)
+        if not mp:
+            mp = re.search(r'content="([^"]+)"\s+itemprop="datePosted"', html)
+        if mp:
+            from datetime import datetime
+            try:
+                pubdate = datetime.strptime(mp.group(1), "%a %b %d %H:%M:%S %Z %Y").strftime("%Y-%m-%d")
+            except Exception:
+                pubdate = mp.group(1)
+
         desc_el = soup.find(class_="jobdescription")
         description = html_to_md(str(desc_el)) if desc_el else None
         description = trim(description, start="ORGANIZATIONAL UNIT", after="INFORMATION ON RECRUITMENT PROCESS")
 
-        return grade, deadline, description
+        return grade, deadline, pubdate, description
     except Exception:
-        return None, None, None
+        return None, None, None, None
 
 
 def scrape_page(url, session):
@@ -161,12 +173,12 @@ def scrape() -> list[dict]:
 
     results = []
     for job, fut in futures:
-        grade, deadline, description = fut.result()
+        grade, deadline, pubdate, description = fut.result()
         results.append({
             "agency": AGENCY, "agency_name": AGENCY_NAME,
             "job_title": job["job_title"], "grade": grade,
             "city": job["city"], "country": job["country"],
-            "deadline": deadline, "url": job["url"],
+            "deadline": deadline, "pubdate": pubdate, "url": job["url"],
             "description": description,
         })
     return results

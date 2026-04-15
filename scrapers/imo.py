@@ -82,6 +82,7 @@ def _parse_job(job):
         "city": "London",
         "country": "United Kingdom",
         "deadline": _parse_deadline(deadline),
+        "pubdate": _parse_deadline(job.get("dateofissue") or None),
         "url": url,
         "description": _parse_description(job),
     }

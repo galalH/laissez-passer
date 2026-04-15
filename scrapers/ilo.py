@@ -64,15 +64,32 @@ def _fetch_description(session, url):
     try:
         resp = session.get(url, headers=HEADERS, timeout=20)
         resp.raise_for_status()
-        el = BeautifulSoup(resp.content, "html.parser").select_one("div.content")
+        soup = BeautifulSoup(resp.content, "html.parser")
+
+        pubdate = None
+        for strong in soup.find_all("strong"):
+            text = strong.get_text(" ")
+            if "Publication date" in text:
+                m = re.search(r"Publication date[:\s]+(\d{1,2}\s+\w+\s+\d{4})", text)
+                if m:
+                    try:
+                        from datetime import datetime
+                        dt = datetime.strptime(m.group(1).strip(), "%d %B %Y")
+                        pubdate = dt.strftime("%Y-%m-%d")
+                    except Exception:
+                        pass
+                break
+
+        el = soup.select_one("div.content")
         description = html_to_md(str(el)) if el else None
-        return trim(
+        description = trim(
             description,
             start=re.compile(r"[#* ]*introduction\b", re.IGNORECASE),
             after=re.compile(r"\*{0,2}recruitment\s+process", re.IGNORECASE),
         )
+        return description, pubdate
     except Exception:
-        return None
+        return None, None
 
 
 def _parse_deadline(s):
@@ -165,7 +182,7 @@ def scrape() -> list:
     with ThreadPoolExecutor(max_workers=10) as ex:
         futures = [(s, ex.submit(_fetch_description, session, s["url"])) for s in stubs]
 
-    return [{**stub, "description": fut.result()} for stub, fut in futures]
+    return [{**stub, "description": desc, "pubdate": pubdate} for stub, (desc, pubdate) in futures]
 
 
 if __name__ == "__main__":

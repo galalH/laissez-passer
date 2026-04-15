@@ -32,22 +32,29 @@ MONTH_MAP = {
 }
 
 
-def fetch_detail(session: requests.Session, job_url: str) -> str | None:
-    """Fetch job detail page and return description markdown."""
+def fetch_detail(session: requests.Session, job_url: str) -> tuple[str | None, str | None]:
+    """Fetch job detail page and return (description, pubdate)."""
     try:
         r = session.get(job_url, timeout=30)
+        # Pubdate: in the !|!CC-City!|!DD-Mon-YYYY!|! block embedded in page JS
+        pubdate = None
+        pm = re.search(r'!\|![A-Z]{2}-\w+!\|!(\d{2}-[A-Z][a-z]{2}-\d{4})', r.text)
+        if pm:
+            pubdate = parse_deadline(pm.group(1))
+        description = None
         encoded_blocks = re.findall(r'!(%3C[^!]{500,})!', r.text, re.IGNORECASE)
         if encoded_blocks:
             best = max(encoded_blocks, key=len)
             decoded = unquote(best.replace('%5C:', ':'))
-            return trim(
+            description = trim(
                 html_to_md(decoded),
                 start=re.compile(r"\*+\d+\.\*+Organizational Context", re.IGNORECASE),
                 after=re.compile(r"\n\*+\d+\.\*+Organizational Competencies", re.IGNORECASE),
             )
+        return description, pubdate
     except Exception:
         pass
-    return None
+    return None, None
 
 
 def parse_deadline(raw):
@@ -124,7 +131,8 @@ def scrape() -> list[dict]:
 
     jobs = []
     for stub, fut in futures:
-        jobs.append({**stub, "description": fut.result()})
+        description, pubdate = fut.result()
+        jobs.append({**stub, "pubdate": pubdate, "description": description})
     return jobs
 
 

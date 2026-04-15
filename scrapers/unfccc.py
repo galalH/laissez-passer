@@ -26,15 +26,14 @@ _SKIP_HEADINGS = re.compile(
 )
 
 
-def _parse_deadline(date_range: str) -> str | None:
-    """Extract closing date from a range like '27 Mar - 12 Apr' → 'YYYY-MM-DD'.
-    Also handles long form: '22 Nov 2024 - 21 Dec 2024'.
+def _parse_date(date_str: str, future: bool = True) -> str | None:
+    """Parse a date string like '12 Apr' or '22 Nov 2024' → 'YYYY-MM-DD'.
+    When future=True (deadlines), months before current month roll to next year.
+    When future=False (pubdates), months after current month roll to last year.
     """
-    if not date_range:
+    if not date_str:
         return None
-    parts = date_range.split(" - ")
-    date_str = parts[-1].strip()
-    m = re.match(r"(\d{1,2})\s+([A-Za-z]{3})(?:\s+(\d{4}))?", date_str)
+    m = re.match(r"(\d{1,2})\s+([A-Za-z]{3})(?:\s+(\d{4}))?", date_str.strip())
     if not m:
         return None
     day = m.group(1).zfill(2)
@@ -44,10 +43,29 @@ def _parse_deadline(date_range: str) -> str | None:
     if m.group(3):
         year = int(m.group(3))
     else:
-        year = datetime.now().year
-        if int(month) < datetime.now().month:
+        now = datetime.now()
+        year = now.year
+        if future and int(month) < now.month:
             year += 1
+        elif not future and int(month) > now.month:
+            year -= 1
     return f"{year}-{month}-{day}"
+
+
+def _parse_deadline(date_range: str) -> str | None:
+    """Extract closing date from a range like '27 Mar - 12 Apr' → 'YYYY-MM-DD'."""
+    if not date_range:
+        return None
+    parts = date_range.split(" - ")
+    return _parse_date(parts[-1], future=True)
+
+
+def _parse_pubdate(date_range: str) -> str | None:
+    """Extract open/publication date from a range like '27 Mar - 12 Apr' → 'YYYY-MM-DD'."""
+    if not date_range:
+        return None
+    parts = date_range.split(" - ")
+    return _parse_date(parts[0], future=False)
 
 
 _HEADERS = {
@@ -123,19 +141,21 @@ def scrape() -> list[dict]:
             grade_raw = cells[1].get_text(strip=True)
             grade = None if grade_raw.upper() in ("N/A", "") else grade_raw
 
-            deadline = _parse_deadline(cells[3].get_text(strip=True))
+            date_range = cells[3].get_text(strip=True)
+            deadline = _parse_deadline(date_range)
+            pubdate = _parse_pubdate(date_range)
 
             stubs.append({
                 "agency": AGENCY, "agency_name": AGENCY_NAME,
                 "job_title": job_title, "grade": grade,
                 "city": "Bonn", "country": "Germany",
-                "deadline": deadline, "url": job_url,
+                "deadline": deadline, "pubdate": pubdate, "url": job_url,
             })
 
     with ThreadPoolExecutor(max_workers=10) as ex:
         futures = [(s, ex.submit(_fetch_description, cookie_dict, s["url"])) for s in stubs]
 
-    return [{**stub, "description": fut.result()} for stub, fut in futures]
+    return [{**stub, "description": fut.result()} for stub, fut in futures]  # pubdate already in stub
 
 
 if __name__ == "__main__":

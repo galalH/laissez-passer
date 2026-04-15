@@ -171,13 +171,15 @@ def scrape() -> list[dict]:
             location_raw = columns[4] if len(columns) > 4 else None
             deadline_raw = columns[6] if len(columns) > 6 else None
 
+            pubdate_raw = columns[5] if len(columns) > 5 else None
             city, country = parse_location(location_raw)
             deadline = parse_deadline(deadline_raw)
+            pubdate = parse_deadline(pubdate_raw)
             job_url = f"{JOB_DETAIL_BASE}{contest_no}" if contest_no else f"{JOB_DETAIL_BASE}{job_id}"
             stubs.append({
                 "agency": AGENCY, "agency_name": AGENCY_NAME,
                 "job_title": job_title, "city": city, "country": country,
-                "deadline": deadline, "url": job_url,
+                "deadline": deadline, "pubdate": pubdate, "url": job_url,
             })
 
         if new_items_on_page == 0 or len(requisitions) < page_size:
@@ -193,6 +195,7 @@ def scrape() -> list[dict]:
         grade, description = fut.result()
         jobs.append({**stub, "grade": grade, "description": description})
     return jobs
+
 
 
 if __name__ == "__main__":

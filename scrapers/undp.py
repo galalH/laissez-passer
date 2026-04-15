@@ -19,18 +19,20 @@ _DETAIL_API = f"{_ORACLE_BASE}/hcmRestApi/resources/latest/recruitingCEJobRequis
 _DESC_FIELDS = ("ExternalDescriptionStr", "ExternalResponsibilitiesStr", "ExternalQualificationsStr")
 
 
-def _fetch_description(session: requests.Session, job_url: str) -> str | None:
+def _fetch_description(session: requests.Session, job_url: str) -> tuple[str | None, str | None]:
     try:
         job_id = job_url.rstrip("/").split("/")[-1]
-        params = {"onlyData": "true", "finder": f'ById;Id="{job_id}",siteNumber=CX_1'}
+        params = {"expand": "all", "onlyData": "true", "finder": f'ById;Id="{job_id}",siteNumber=CX_1'}
         resp = session.get(_DETAIL_API, params=params, timeout=30)
         resp.raise_for_status()
         item = (resp.json().get("items") or [{}])[0]
+        start_date = item.get("ExternalPostedStartDate") or None
+        pubdate = start_date[:10] if start_date else None
         parts = [html_to_md(item.get(f) or "") or "" for f in _DESC_FIELDS]
         description = "\n\n".join(p for p in parts if p) or None
-        return trim(description, after=re.compile(r"\*+\s*Equal opportunity"))
+        return trim(description, after=re.compile(r"\*+\s*Equal opportunity")), pubdate
     except Exception:
-        return None
+        return None, None
 
 _MONTHS = {
     "Jan": "01", "Feb": "02", "Mar": "03", "Apr": "04", "May": "05", "Jun": "06",
@@ -117,7 +119,9 @@ def scrape() -> list[dict]:
     with ThreadPoolExecutor(max_workers=10) as ex:
         futures = [ex.submit(_fetch_description, session, s['url']) for s in stubs]
     for stub, fut in zip(stubs, futures):
-        stub['description'] = fut.result()
+        description, pubdate = fut.result()
+        stub['description'] = description
+        stub['pubdate'] = pubdate
         jobs.append(stub)
 
     return jobs

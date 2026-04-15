@@ -54,20 +54,32 @@ def make_payload(page_no):
     }
 
 
-def fetch_detail(session: requests.Session, job_url: str) -> str | None:
-    """Fetch job detail page and return description markdown."""
+def fetch_detail(session: requests.Session, job_url: str, contest_no: str = "") -> tuple[str | None, str | None]:
+    """Fetch job detail page and return (description, pubdate)."""
     try:
         r = session.get(job_url, timeout=30)
-        encoded_blocks = re.findall(r'!(%3C[^!]{500,})!', r.text, re.IGNORECASE)
+        html = r.text
+
+        pubdate = None
+        if contest_no:
+            m = re.search(
+                rf"'{re.escape(contest_no)}','[^']*','[^']*','[^']*','[^']*','[^']*','[^']*','([^']+)'",
+                html,
+            )
+            if m:
+                pubdate = parse_deadline(m.group(1))
+
+        encoded_blocks = re.findall(r'!(%3C[^!]{500,})!', html, re.IGNORECASE)
         if encoded_blocks:
             best = max(encoded_blocks, key=len)
             decoded = unquote(best.replace('%5C:', ':'))
             description = html_to_md(decoded)
             description = trim(description, after=re.compile(r"\n+[#*\s]*additional\s+information", re.IGNORECASE))
-            return description
+            return description, pubdate
+        return None, pubdate
     except Exception:
         pass
-    return None
+    return None, None
 
 
 def parse_location(raw):
@@ -151,6 +163,7 @@ def scrape() -> list[dict]:
             city, country = parse_location(location_raw)
             job_url = f"{JOB_DETAIL_BASE}{contest_no}" if contest_no else JOBS_URL
             stubs.append({
+                "_contest_no": contest_no,
                 "agency": AGENCY, "agency_name": AGENCY_NAME,
                 "job_title": job_title, "grade": grade,
                 "city": city, "country": country,
@@ -163,11 +176,12 @@ def scrape() -> list[dict]:
         page_no += 1
 
     with ThreadPoolExecutor(max_workers=10) as ex:
-        futures = [(s, ex.submit(fetch_detail, session, s["url"])) for s in stubs]
+        futures = [(s, ex.submit(fetch_detail, session, s["url"], s.pop("_contest_no", ""))) for s in stubs]
 
     jobs = []
     for stub, fut in futures:
-        jobs.append({**stub, "description": fut.result()})
+        description, pubdate = fut.result()
+        jobs.append({**stub, "description": description, "pubdate": pubdate})
     return jobs
 
 

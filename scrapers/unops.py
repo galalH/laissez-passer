@@ -60,6 +60,12 @@ def _fetch_detail(url, session):
         else:
             grade = contract_level or None
 
+        pubdate = None
+        for i, line in enumerate(lines):
+            if line == "Posting Start Date" and i + 1 < len(lines):
+                pubdate = _parse_deadline(lines[i + 1])
+                break
+
         html_parts = []
         in_range = False
         for h3 in soup.find_all("h3", id=re.compile(r"^section\d+__title$")):
@@ -77,9 +83,9 @@ def _fetch_detail(url, session):
                     html_parts.append(str(content_div))
         description = html_to_md("".join(html_parts)) or None
 
-        return grade, description
+        return grade, pubdate, description
     except Exception:
-        return None, None
+        return None, None, None
 
 
 def _parse_location(location_str):
@@ -152,8 +158,8 @@ def scrape() -> list[dict]:
 
     jobs = []
     for stub, fut in futures:
-        grade, description = fut.result()
-        jobs.append({**stub, "grade": grade, "description": description})
+        grade, pubdate, description = fut.result()
+        jobs.append({**stub, "grade": grade, "pubdate": pubdate, "description": description})
     return jobs
 
 

@@ -145,7 +145,7 @@ def scrape() -> list[dict]:
             "agency": AGENCY, "agency_name": AGENCY_NAME,
             "job_title": job_title, "grade": grade,
             "city": city, "country": country,
-            "deadline": parsed_deadline, "url": url,
+            "deadline": parsed_deadline, "pubdate": _parse_deadline(issue_date), "url": url,
         })
 
     with ThreadPoolExecutor(max_workers=10) as ex:

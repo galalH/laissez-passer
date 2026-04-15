@@ -130,6 +130,8 @@ def scrape() -> list[dict]:
                 unknown_depts.add(dept_name)
             agency_abbr = DEPT_ABBR.get(dept_name, "UNS")
             deadline = item.get("endDate")
+            start_date = item.get("startDate")
+            pubdate = start_date[:10] if start_date else None
 
             desc_html = item.get("jobDescription") or ""
             description = html_to_md(desc_html)
@@ -143,6 +145,7 @@ def scrape() -> list[dict]:
                 "city": city,
                 "country": None,
                 "deadline": deadline[:10] if deadline else None,
+                "pubdate": pubdate,
                 "url": f"https://careers.un.org/jobSearchDescription/{item.get('jobId')}",
                 "description": description,
             })

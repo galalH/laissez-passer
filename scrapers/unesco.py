@@ -69,18 +69,30 @@ _HEADERS = {
 }
 
 
-def _fetch_description(session, job_url: str) -> str | None:
+def _fetch_description(session, job_url: str) -> tuple[str | None, str | None]:
     try:
         resp = session.get(job_url, timeout=20)
         resp.raise_for_status()
-        el = BeautifulSoup(resp.text, "html.parser").find(class_="jobdescription")
-        return trim(
+        html = resp.text
+        pubdate = None
+        m = re.search(r'itemprop="datePosted"\s+content="([^"]+)"', html)
+        if not m:
+            m = re.search(r'content="([^"]+)"\s+itemprop="datePosted"', html)
+        if m:
+            from datetime import datetime
+            try:
+                pubdate = datetime.strptime(m.group(1), "%a %b %d %H:%M:%S %Z %Y").strftime("%Y-%m-%d")
+            except Exception:
+                pubdate = m.group(1)
+        el = BeautifulSoup(html, "html.parser").find(class_="jobdescription")
+        description = trim(
             html_to_md(str(el)) if el else None,
             before=re.compile(r"UNESCO Core Values: Commitment to the Organization, Integrity, Respect for Diversity, Professionalism\**"),
             after=re.compile(r"\**\s*BENEFITS AND ENTITLEMENTS"),
         )
+        return description, pubdate
     except Exception:
-        return None
+        return None, None
 
 
 def scrape() -> list[dict]:
@@ -156,7 +168,8 @@ def scrape() -> list[dict]:
 
     jobs = []
     for stub, fut in futures:
-        jobs.append({**stub, "description": fut.result()})
+        description, pubdate = fut.result()
+        jobs.append({**stub, "pubdate": pubdate, "description": description})
     return jobs
 
 

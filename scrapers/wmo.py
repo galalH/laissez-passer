@@ -48,10 +48,12 @@ def _fetch_detail(session, job_id):
                 break
         end_date = item.get("ExternalPostedEndDate") or None
         deadline = end_date[:10] if end_date else None
+        start_date = item.get("ExternalPostedStartDate") or None
+        pubdate = start_date[:10] if start_date else None
         parts = [html_to_md(item.get(f) or "") or "" for f in _DESC_FIELDS]
         description = "\n\n".join(p for p in parts if p) or None
         description = trim(description, after=re.compile(r"\n[^\n]*?\*+[^*\n]*additional information[^*\n]*\*+", re.IGNORECASE))
-        return grade, deadline, description
+        return grade, deadline, pubdate, description
     except Exception:
         return None, None, None
 
@@ -110,8 +112,8 @@ def scrape() -> list[dict]:
 
     jobs = []
     for stub, fut in futures:
-        grade, deadline, description = fut.result()
-        jobs.append({**stub, "grade": grade, "deadline": deadline, "description": description})
+        grade, deadline, pubdate, description = fut.result()
+        jobs.append({**stub, "grade": grade, "deadline": deadline, "pubdate": pubdate, "description": description})
     return jobs
 
 

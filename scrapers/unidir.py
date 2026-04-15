@@ -59,15 +59,20 @@ def _split_location(s: str | None) -> tuple[str | None, str | None]:
     return city, country
 
 
-def _fetch_description(session: requests.Session, url: str) -> str | None:
+def _fetch_description(session: requests.Session, url: str) -> tuple[str | None, str | None]:
     try:
         resp = session.get(url, headers=HEADERS, timeout=20)
         resp.raise_for_status()
         soup = BeautifulSoup(resp.content, "html.parser")
+        pubdate = None
+        tag = soup.find("meta", property="article:published_time")
+        if tag:
+            raw = tag.get("content", "")
+            pubdate = raw[:10] if raw else None
         content = soup.find("div", class_="post-content")
-        return html_to_md(str(content)) if content else None
+        return html_to_md(str(content)) if content else None, pubdate
     except Exception:
-        return None
+        return None, None
 
 
 def scrape() -> list[dict]:
@@ -124,7 +129,11 @@ def scrape() -> list[dict]:
     with ThreadPoolExecutor(max_workers=10) as ex:
         futures = [(s, ex.submit(_fetch_description, session, s["url"])) for s in stubs]
 
-    return [{**stub, "description": fut.result()} for stub, fut in futures]
+    jobs = []
+    for stub, fut in futures:
+        description, pubdate = fut.result()
+        jobs.append({**stub, "pubdate": pubdate, "description": description})
+    return jobs
 
 
 if __name__ == "__main__":

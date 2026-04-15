@@ -71,19 +71,32 @@ def _parse_duty_station(ds: str) -> tuple[str | None, str | None]:
     return token, None
 
 
-def _get_job_ids(dwr_text: str) -> list[int]:
-    """Extract job IDs from DWR response by finding all 's\\d+.id=\\d+;' tokens."""
-    seen = set()
-    ids = []
-    for job_id_str in re.findall(r's\d+\.id=(\d+);', dwr_text):
+def _get_job_ids(dwr_text: str) -> list[tuple[int, str | None]]:
+    """Extract job IDs and posting dates from DWR response.
+
+    Returns list of (job_id, pubdate) tuples where pubdate is YYYY-MM-DD or None.
+    """
+    # Build map of sVar -> postingDate
+    posting_dates: dict[str, str | None] = {}
+    for svar, raw_date in re.findall(r's(\d+)\.postingDate="([^"]+)";', dwr_text):
+        date_str = raw_date.replace("\\/", "/")
+        try:
+            day, month, year = date_str.split("/")
+            posting_dates[svar] = f"{year}-{month.zfill(2)}-{day.zfill(2)}"
+        except ValueError:
+            posting_dates[svar] = None
+
+    seen: set[int] = set()
+    result = []
+    for svar, job_id_str in re.findall(r's(\d+)\.id=(\d+);', dwr_text):
         job_id = int(job_id_str)
         if job_id not in seen:
             seen.add(job_id)
-            ids.append(job_id)
-    return ids
+            result.append((job_id, posting_dates.get(svar)))
+    return result
 
 
-def _fetch_job(session: requests.Session, job_id: int) -> dict | None:
+def _fetch_job(session: requests.Session, job_id: int, pubdate: str | None = None) -> dict | None:
     """Fetch job detail page and extract title, grade, duty station, and deadline."""
     try:
         r = session.get(f"{DETAIL_BASE}{job_id}", timeout=30)
@@ -144,6 +157,7 @@ def _fetch_job(session: requests.Session, job_id: int) -> dict | None:
             "city": city,
             "country": country,
             "deadline": deadline,
+            "pubdate": pubdate,
             "url": f"{DETAIL_BASE}{job_id}",
             "description": description,
         }
@@ -239,7 +253,7 @@ def scrape() -> list[dict]:
     job_ids = _get_job_ids(resp_all.text)
 
     with ThreadPoolExecutor(max_workers=10) as ex:
-        futures = [ex.submit(_fetch_job, session, job_id) for job_id in job_ids]
+        futures = [ex.submit(_fetch_job, session, job_id, pubdate) for job_id, pubdate in job_ids]
 
     return [job for fut in futures if (job := fut.result()) is not None]
 

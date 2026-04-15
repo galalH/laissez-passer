@@ -129,7 +129,8 @@ def _normalize_location(
 def _process_job(job: dict, agency: str, previous: dict, now: str) -> list[str]:
     warnings: list[str] = []
 
-    job["pubdate"] = previous.get(job.get("url", ""), now)
+    if not job.get("pubdate"):
+        job["pubdate"] = previous.get(job.get("url", ""), now)
 
     raw = job.get("grade")
     job["grade_raw"] = raw

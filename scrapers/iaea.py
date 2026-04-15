@@ -77,8 +77,9 @@ def fetch_detail(session: requests.Session, job_url: str) -> tuple[str | None, s
         r = session.get(job_url, timeout=30)
         html = r.text
 
-        # Deadline: dates appear in order posted, posted, closing, closing — take index 2
+        # Dates appear in order: posted, posted, closing, closing
         dates = re.findall(r"(\d{4}-\d{2}-\d{2}), \d{1,2}:\d{2}:\d{2} [AP]M", html)
+        pubdate = dates[0] if dates else None
         deadline = dates[2] if len(dates) >= 3 else None
 
         # Description: longest URL-encoded HTML block (%3C...) delimited by !
@@ -107,9 +108,9 @@ def fetch_detail(session: requests.Session, job_url: str) -> tuple[str | None, s
             after=re.compile(r"[\n\s]+[#*\s]*Remuneration", re.IGNORECASE),
         )
         description = trim(description, after="\n\n','false',")
-        return deadline, description
+        return deadline, pubdate, description
     except Exception:
-        return None, None
+        return None, None, None
 
 
 def scrape() -> list[dict]:
@@ -183,8 +184,8 @@ def scrape() -> list[dict]:
 
     jobs = []
     for stub, fut in futures:
-        deadline, description = fut.result()
-        jobs.append({**stub, "deadline": deadline, "description": description})
+        deadline, pubdate, description = fut.result()
+        jobs.append({**stub, "deadline": deadline, "pubdate": pubdate, "description": description})
     return jobs
 
 
