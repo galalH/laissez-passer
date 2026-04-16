@@ -1258,7 +1258,7 @@ document.addEventListener('keydown', function(e) {
       break;
     }
     case 'r':
-      document.getElementById('updated-at').click();
+      if (!e.ctrlKey && !e.metaKey) document.getElementById('updated-at').click();
       break;
     case 'p':
       openSettings();
