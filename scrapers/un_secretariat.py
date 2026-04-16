@@ -101,6 +101,7 @@ HEADERS = {
 def scrape() -> list[dict]:
     """Scrape all job openings from careers.un.org via its JSON API."""
     all_jobs = []
+    seen_ids: set = set()
     page = 0
 
     while True:
@@ -122,6 +123,11 @@ def scrape() -> list[dict]:
             break
 
         for item in items:
+            job_id = item.get("jobId")
+            if not job_id or job_id in seen_ids:
+                continue
+            seen_ids.add(job_id)
+
             duty_stations = item.get("dutyStation", [])
             city = ", ".join(ds.get("description", "") for ds in duty_stations) if duty_stations else None
             dept = item.get("dept", {})
@@ -146,7 +152,7 @@ def scrape() -> list[dict]:
                 "country": None,
                 "deadline": deadline[:10] if deadline else None,
                 "pubdate": pubdate,
-                "url": f"https://careers.un.org/jobSearchDescription/{item.get('jobId')}",
+                "url": f"https://careers.un.org/jobSearchDescription/{job_id}",
                 "description": description,
             })
 
