@@ -126,11 +126,11 @@ def _normalize_location(
     return city, country or country_hint
 
 
-def _process_job(job: dict, agency: str, previous: dict, now: str) -> list[str]:
+def _process_job(job: dict, agency: str, previous: dict, today: str) -> list[str]:
     warnings: list[str] = []
 
     if not job.get("pubdate"):
-        job["pubdate"] = previous.get(job.get("url", ""), now)
+        job["pubdate"] = previous.get(job.get("url", ""), today)
 
     raw = job.get("grade")
     job["grade_raw"] = raw
@@ -208,6 +208,7 @@ def scrape(progress=print):
     plugins = _discover_plugins()
     random.shuffle(plugins)
     now = datetime.now().astimezone().isoformat(timespec='seconds')
+    today = datetime.now().date().isoformat()
 
     all_jobs = []
     agency_count = 0
@@ -247,7 +248,7 @@ def scrape(progress=print):
                 warning_count += 1
             else:
                 for job in jobs:
-                    for w in _process_job(job, agency, previous, now):
+                    for w in _process_job(job, agency, previous, today):
                         progress(f"warning:{w}")
                         warning_count += 1
                 all_jobs.extend(jobs)
