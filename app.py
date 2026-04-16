@@ -254,6 +254,23 @@ def scrape(progress=print):
                 agency_count += 1
             progress(f"progress:{n}/{total}:{agency}:{len(jobs)}")
 
+    # Carry over existing scores so only genuinely new jobs get re-scored.
+    if DATA_FILE.exists():
+        try:
+            with open(DATA_FILE) as f:
+                old_payload = json.load(f)
+            old_scores = {
+                job["url"]: job["score"]
+                for job in old_payload.get("jobs", [])
+                if job.get("url") and job.get("score") is not None
+            }
+            for job in all_jobs:
+                url = job.get("url")
+                if url and url in old_scores and job.get("score") is None:
+                    job["score"] = old_scores[url]
+        except Exception:
+            pass
+
     DATA_FILE.parent.mkdir(parents=True, exist_ok=True)
     payload = {"updated": now, "jobs": all_jobs}
     with open(DATA_FILE, "w") as f:
