@@ -150,7 +150,7 @@ def _parse_jobs(html):
         opened_el = soup.find("span", id=f"SCH_OPENED${i}")
         pubdate = _parse_deadline(opened_el.get_text(strip=True) if opened_el else None)
 
-        url = JOBS_URL
+        url = JOB_DETAIL_URL.format(job_id=job_id) if job_id else JOBS_URL
 
         jobs.append({
             "agency": AGENCY,
