@@ -358,7 +358,7 @@ def score_new_jobs(all_jobs: list, progress=print, jobs_to_score: list | None = 
             progress("scoring_skip:all jobs already scored")
             return
 
-        client = openai.OpenAI(api_key=api_key, max_retries=0)
+        client = openai.OpenAI(api_key=api_key, max_retries=2)
 
         # ── Split into token-capped batches ───────────────────────────────────
         # Rough estimate: 1 token ≈ 4 chars.  Each request costs:
@@ -424,7 +424,10 @@ def score_new_jobs(all_jobs: list, progress=print, jobs_to_score: list | None = 
             started_at = time.monotonic()
             while batch.status not in _TERMINAL:
                 time.sleep(10)
-                batch = client.batches.retrieve(batch.id)
+                try:
+                    batch = client.batches.retrieve(batch.id)
+                except Exception:
+                    continue
                 elapsed = int(time.monotonic() - started_at)
                 progress(f"scoring:{jobs_done + batch.request_counts.completed}:{len(to_score)}:{elapsed}")
 
@@ -498,7 +501,7 @@ def _resume_scoring(progress) -> bool:
         return False
 
     try:
-        client = openai.OpenAI(api_key=api_key, max_retries=0)
+        client = openai.OpenAI(api_key=api_key, max_retries=2)
 
         _ACTIVE    = {"validating", "in_progress", "finalizing"}
         _TERMINAL  = {"completed", "failed", "expired", "cancelled"}
@@ -527,7 +530,10 @@ def _resume_scoring(progress) -> bool:
 
         while still_active:
             for bid in list(still_active):
-                b = client.batches.retrieve(bid)
+                try:
+                    b = client.batches.retrieve(bid)
+                except Exception:
+                    continue
                 batch_objs[bid] = b
                 if b.status in _TERMINAL:
                     still_active.discard(bid)
@@ -843,6 +849,51 @@ def filter_json():
         ensure_ascii=False,
     ))
     return jsonify({"status": "ok", "pandas_query": pandas_query})
+
+
+@app.route("/api/scoring-status")
+def api_scoring_status():
+    api_key = os.environ.get("OPENAI_API_KEY")
+    if not api_key:
+        return jsonify({"pending": False})
+    try:
+        import openai
+        client = openai.OpenAI(api_key=api_key, max_retries=0)
+        _ACTIVE = {"validating", "in_progress", "finalizing"}
+        active = [b for b in client.batches.list() if b.status in _ACTIVE]
+        return jsonify({"pending": bool(active), "count": len(active)})
+    except Exception:
+        return jsonify({"pending": False})
+
+
+def _resume_scoring_lines():
+    q: queue.Queue = queue.Queue()
+
+    def progress(msg: str) -> None:
+        q.put(msg)
+
+    def run() -> None:
+        try:
+            _resume_scoring(progress)
+        finally:
+            q.put(None)
+
+    threading.Thread(target=run, daemon=True).start()
+
+    while True:
+        msg = q.get()
+        if msg is None:
+            break
+        yield msg
+
+
+@app.route("/resume-scoring", methods=["POST"])
+def resume_scoring_route():
+    def generate():
+        for line in _resume_scoring_lines():
+            yield f"data:{line}\n\n"
+
+    return Response(stream_with_context(generate()), mimetype="text/event-stream")
 
 
 @app.route("/api/config")

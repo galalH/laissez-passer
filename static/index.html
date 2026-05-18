@@ -726,7 +726,7 @@ function closeSettings() {
   document.getElementById('settings-overlay').classList.remove('visible');
 }
 
-function handleScoringStream(reader) {
+function handleScoringStream(reader, onDone) {
   const scoreErrorEl = document.getElementById('score-error');
   const updatedAtEl  = document.getElementById('updated-at');
   const decoder = new TextDecoder();
@@ -759,13 +759,13 @@ function handleScoringStream(reader) {
 
   function read() {
     reader.read().then(({done, value}) => {
-      if (done) { reloadJobs(); return; }
+      if (done) { reloadJobs(); if (onDone) onDone(); return; }
       buffer += decoder.decode(value, {stream: true});
       const lines = buffer.split('\n');
       buffer = lines.pop();
       lines.forEach(processLine);
       read();
-    }).catch(() => {});
+    }).catch(() => { if (onDone) onDone(); });
   }
   read();
 }
@@ -1415,6 +1415,23 @@ function init() {
       renderList();
       applySelection();
     });
+
+    // Auto-resume batch scoring if a batch is still in flight from a prior refresh
+    fetch('/api/scoring-status')
+      .then(r => r.json())
+      .then(function(status) {
+        if (!status.pending) return;
+        const el = document.getElementById('updated-at');
+        if (el.classList.contains('refreshing')) return;
+        el.classList.add('refreshing');
+        el.textContent = 'scoring in progress…';
+        fetch('/resume-scoring', { method: 'POST' })
+          .then(r => handleScoringStream(r.body.getReader(), function() {
+            el.classList.remove('refreshing');
+          }))
+          .catch(function() { el.classList.remove('refreshing'); renderUpdatedAt(); });
+      })
+      .catch(function() {});
   });
 
   // Refresh
