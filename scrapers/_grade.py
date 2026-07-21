@@ -230,6 +230,13 @@ def normalize_grade(
     if m:
         return f"SC I-{int(m.group(1))}", "Service Contract"
 
+    # UNOPS appends "(ICS NN)" to every other contract level too (LICA, GS-,
+    # IP P-, IP D-, ...) — strip it and retry against the base grade.
+    if s not in GRADE_MAP:
+        m = re.match(r"^(.*)\s+\(ICS\s*\d+\)$", s)
+        if m and m.group(1) in GRADE_MAP:
+            s = m.group(1)
+
     if s in GRADE_MAP:
         grade, category = GRADE_MAP[s]
         if category == "UN Tourism" and title:
