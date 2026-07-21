@@ -609,7 +609,7 @@ DataFrame columns:
 
 Canonical grade values by category:
   Professional:     P-1  P-2  P-3  P-4  P-5
-  Director:         P-6  P-7  D-1  D-2
+  Director:         D-1  D-2
   General Service:  G-1  G-2  G-3  G-4  G-5  G-6  G-7
   Field Service:    FS-1  FS-2  FS-3  FS-4  FS-5  FS-6  FS-7
   National Officer: NO-A  NO-B  NO-C  NO-D  NO-E

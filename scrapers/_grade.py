@@ -33,22 +33,25 @@ def _letter(letters: str, prefix: str, category: str) -> dict[str, tuple[str, st
 
 GRADE_MAP: dict[str, tuple[str | None, str]] = {}
 
-# P-series: P-1 to P-5 Professional, P-6/P-7 Director
+# P-series: P-1 to P-5 Professional. P-6/P-7 aren't real UN grades — that
+# seniority tier is D-1/D-2, so map them to the real Director canonical values.
+_P6_P7_TO_D = {6: "D-1", 7: "D-2"}
 GRADE_MAP.update(_p(range(1, 6), "P", "Professional"))
-GRADE_MAP.update(_p(range(6, 8), "P", "Director"))
+GRADE_MAP.update({f"P-{n}": (d, "Director") for n, d in _P6_P7_TO_D.items()})
+GRADE_MAP.update({f"P{n}": (d, "Director") for n, d in _P6_P7_TO_D.items()})
 
 # PR-series (UNHCR): map to standard P grades
 GRADE_MAP.update({f"PR-{n}": (f"P-{n}", "Professional") for n in range(1, 6)})
 GRADE_MAP.update({f"PR{n}": (f"P-{n}", "Professional") for n in range(1, 6)})
-GRADE_MAP.update({f"PR-{n}": (f"P-{n}", "Director") for n in range(6, 8)})
-GRADE_MAP.update({f"PR{n}": (f"P-{n}", "Director") for n in range(6, 8)})
+GRADE_MAP.update({f"PR-{n}": (d, "Director") for n, d in _P6_P7_TO_D.items()})
+GRADE_MAP.update({f"PR{n}": (d, "Director") for n, d in _P6_P7_TO_D.items()})
 
 # D-series
 GRADE_MAP.update(_p(range(1, 3), "D", "Director"))
 
 # IP P-series and IP D-series (UNOPS) — mapped to standard grades
 GRADE_MAP.update({f"IP P-{n}": (f"P-{n}", "Professional") for n in range(1, 6)})
-GRADE_MAP.update({f"IP P-{n}": (f"P-{n}", "Director") for n in range(6, 8)})
+GRADE_MAP.update({f"IP P-{n}": (d, "Director") for n, d in _P6_P7_TO_D.items()})
 GRADE_MAP.update({f"IP D-{n}": (f"D-{n}", "Director") for n in range(1, 3)})
 
 # FS-series
@@ -70,7 +73,7 @@ GRADE_MAP.update({f"NO{n}": (f"NO-{_NO_NUM_TO_LETTER[n]}", "National Officer") f
 # ISA-series (UNIDO) — mapped to standard grades
 GRADE_MAP.update({f"ISA-G{n}": (f"G-{n}", "General Service") for n in range(1, 8)})
 GRADE_MAP.update({f"ISA-P{n}": (f"P-{n}", "Professional") for n in range(1, 6)})
-GRADE_MAP.update({f"ISA-P{n}": (f"P-{n}", "Director") for n in range(6, 8)})
+GRADE_MAP.update({f"ISA-P{n}": (d, "Director") for n, d in _P6_P7_TO_D.items()})
 GRADE_MAP.update({f"ISA-NO{ch}": (f"NO-{ch}", "National Officer") for ch in "ABCDE"})
 GRADE_MAP["ISA -G3"] = ("G-3", "General Service")  # data artifact with space
 
