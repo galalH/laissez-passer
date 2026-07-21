@@ -70,6 +70,11 @@ _NO_NUM_TO_LETTER = dict(enumerate("ABCDE", 1))
 GRADE_MAP.update({f"NO-{n}": (f"NO-{_NO_NUM_TO_LETTER[n]}", "National Officer") for n in range(1, 6)})
 GRADE_MAP.update({f"NO{n}": (f"NO-{_NO_NUM_TO_LETTER[n]}", "National Officer") for n in range(1, 6)})
 
+# FAO NPO (National Professional Officer) grade level, e.g. "N-3"
+GRADE_MAP.update({f"N-{n}": (f"NO-{_NO_NUM_TO_LETTER[n]}", "National Officer") for n in range(1, 6)})
+# Fallback when FAO's Grade Level is N/A and only the bare requisition type is available
+GRADE_MAP["NPO"] = ("NO-UNK", "National Officer")
+
 # ISA-series (UNIDO) — mapped to standard grades
 GRADE_MAP.update({f"ISA-G{n}": (f"G-{n}", "General Service") for n in range(1, 8)})
 GRADE_MAP.update({f"ISA-P{n}": (f"P-{n}", "Professional") for n in range(1, 6)})
@@ -85,9 +90,10 @@ for n in range(1, 12):
 # SB-series (Service Contract)
 GRADE_MAP.update(_p(range(1, 6), "SB", "Service Contract"))
 
-# NPP / PSA (FAO) → SC L-UNK
+# FAO: NPP (National Project Personnel) is national; PSA (Personal Services
+# Agreement) is used exclusively for international contracts
 GRADE_MAP["NPP"] = ("SC L-UNK", "Service Contract")
-GRADE_MAP["PSA"] = ("SC L-UNK", "Service Contract")
+GRADE_MAP["PSA"] = ("SC I-UNK", "Service Contract")
 
 # WFP SC and SSA — disambiguated via workerSubType facet into national
 # (General Service) vs international (Professional) service contracts

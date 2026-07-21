@@ -612,7 +612,7 @@ Canonical grade values by category:
   Director:         D-1  D-2
   General Service:  G-1  G-2  G-3  G-4  G-5  G-6  G-7
   Field Service:    FS-1  FS-2  FS-3  FS-4  FS-5  FS-6  FS-7
-  National Officer: NO-A  NO-B  NO-C  NO-D  NO-E
+  National Officer: NO-A  NO-B  NO-C  NO-D  NO-E  NO-UNK
   Service Contract (local, levels 1–11): SC L-1 … SC L-11  SC L-UNK
   Service Contract (intl, levels 1–7):   SC I-1 … SC I-7   SC I-UNK
   Service Contract (level unknown):      SC UNK
