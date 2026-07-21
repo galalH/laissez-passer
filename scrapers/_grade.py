@@ -86,7 +86,15 @@ GRADE_MAP.update(_p(range(1, 6), "SB", "Service Contract"))
 GRADE_MAP["NPP"] = ("SC L-UNK", "Service Contract")
 GRADE_MAP["PSA"] = ("SC L-UNK", "Service Contract")
 
-# WFP SC and SSA — used for both local and international, level unknown
+# WFP SC and SSA — disambiguated via workerSubType facet into national
+# (General Service) vs international (Professional) service contracts
+for n in range(1, 12):
+    GRADE_MAP[f"SC L{n} GS"] = (f"SC L-{n}", "Service Contract")
+    GRADE_MAP[f"SC L{n} INT"] = (f"SC I-{n}", "Service Contract")
+    GRADE_MAP[f"SSA L{n} GS"] = (f"SC L-{n}", "Service Contract")
+    GRADE_MAP[f"SSA L{n} INT"] = (f"SC I-{n}", "Service Contract")
+
+# Fallback if the workerSubType facet lookup failed, level unknown
 for n in range(1, 12):
     GRADE_MAP[f"SC L{n}"] = ("SC UNK", "Service Contract")
     GRADE_MAP[f"SSA L{n}"] = ("SC UNK", "Service Contract")

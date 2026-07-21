@@ -1,5 +1,12 @@
-"""WFP Job Scraper - iterates Management_Level grade facet for authoritative grades."""
+"""WFP Job Scraper - iterates Management_Level grade facet for authoritative grades.
 
+SC and SSA grades (e.g. "SC L4") are ambiguous between national (General Service)
+and international (Professional) positions, so they're cross-referenced against
+the workerSubType facet ("SC General Service" / "SC Professional" / "SSA General
+Service Field" / "SSA Professional Field") to disambiguate.
+"""
+
+import re
 import requests
 import json
 from concurrent.futures import ThreadPoolExecutor
@@ -50,29 +57,46 @@ def _fetch_detail(session, external_path):
         return None, None, None
 
 
-def _fetch_grade_facets(session):
+def _fetch_facet_values(session, facet_param):
     try:
         payload = {"appliedFacets": {}, "limit": 1, "offset": 0, "searchText": ""}
         resp = session.post(API_URL, json=payload, headers=HEADERS, timeout=30)
         resp.raise_for_status()
         facets = resp.json().get("facets", [])
         for facet in facets:
-            if facet.get("facetParameter") == "Management_Level":
-                return [(v["descriptor"], v["id"]) for v in facet.get("values", [])]
+            if facet.get("facetParameter") == facet_param:
+                return {v["descriptor"]: v["id"] for v in facet.get("values", [])}
     except Exception:
         pass
-    return []
+    return {}
 
 
-def _collect_stubs_for_grade(session, grade_descriptor, grade_id):
+def _fetch_grade_facets(session):
+    return list(_fetch_facet_values(session, "Management_Level").items())
+
+
+# SC/SSA grade descriptors (e.g. "SC L4") don't distinguish national (General
+# Service) from international (Professional) positions on their own; the
+# workerSubType facet does.
+_SC_SSA_RE = re.compile(r"^(SC|SSA) L\d+$")
+_WORKER_SUBTYPES = {
+    "SC": {"GS": "SC General Service", "INT": "SC Professional"},
+    "SSA": {"GS": "SSA General Service Field", "INT": "SSA Professional Field"},
+}
+
+
+def _collect_stubs_for_grade(session, grade_descriptor, grade_id, extra_facets=None):
     """Collect job stubs (without description/deadline) for a given grade."""
     stubs = []
     offset = 0
     limit = 20
+    applied_facets = {"Management_Level": [grade_id]}
+    if extra_facets:
+        applied_facets.update(extra_facets)
     while True:
         try:
             payload = {
-                "appliedFacets": {"Management_Level": [grade_id]},
+                "appliedFacets": applied_facets,
                 "limit": limit, "offset": offset, "searchText": "",
             }
             resp = session.post(API_URL, json=payload, headers=HEADERS, timeout=30)
@@ -109,8 +133,22 @@ def scrape() -> list[dict]:
     all_stubs = []
 
     grade_facets = _fetch_grade_facets(session)
+    subtype_ids = _fetch_facet_values(session, "workerSubType")
+
     for descriptor, grade_id in grade_facets:
-        all_stubs.extend(_collect_stubs_for_grade(session, descriptor, grade_id))
+        m = _SC_SSA_RE.match(descriptor)
+        if m and subtype_ids:
+            prefix = m.group(1)
+            for suffix, subtype_name in _WORKER_SUBTYPES[prefix].items():
+                subtype_id = subtype_ids.get(subtype_name)
+                if not subtype_id:
+                    continue
+                all_stubs.extend(_collect_stubs_for_grade(
+                    session, f"{descriptor} {suffix}", grade_id,
+                    extra_facets={"workerSubType": [subtype_id]},
+                ))
+        else:
+            all_stubs.extend(_collect_stubs_for_grade(session, descriptor, grade_id))
 
     cache = load_cached_jobs()
     futures = []
