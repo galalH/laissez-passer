@@ -10,6 +10,7 @@ import queue
 import random
 import re
 import sys
+import tempfile
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -47,7 +48,25 @@ SCRAPERS_DIR = BASE_DIR / "scrapers"
 DATA_FILE = BASE_DIR / "static" / "data.json"
 FILTER_FILE = BASE_DIR / "static" / "filter.json"
 
-_DUTY_STATION_URL = "https://unsceb.org/sites/default/files/statistic_files/HR/duty_station.csv"
+_DATA_FILE_LOCK = threading.Lock()
+
+
+def _write_data_file(payload: dict) -> None:
+    """Atomically write payload to DATA_FILE using a temp file + os.replace()."""
+    with _DATA_FILE_LOCK:
+        fd, tmp_path = tempfile.mkstemp(dir=DATA_FILE.parent, suffix=".tmp")
+        try:
+            with os.fdopen(fd, "w") as f:
+                json.dump(payload, f, ensure_ascii=False, separators=(",", ":"))
+            os.replace(tmp_path, DATA_FILE)
+        except Exception:
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
+            raise
+
+_DUTY_STATION_URL = "https://unsceb.org/assets/data/HR/duty_station.csv"
 
 
 def _load_duty_stations() -> dict[str, tuple[str, str]]:
@@ -273,9 +292,7 @@ def scrape(progress=print):
             pass
 
     DATA_FILE.parent.mkdir(parents=True, exist_ok=True)
-    payload = {"updated": now, "jobs": all_jobs}
-    with open(DATA_FILE, "w") as f:
-        json.dump(payload, f, indent=2, ensure_ascii=False)
+    _write_data_file({"updated": now, "jobs": all_jobs})
 
     suffix = f" · {warning_count} warnings" if warning_count else ""
     progress(f"done:{len(all_jobs)} jobs from {agency_count} agencies{suffix}")
@@ -445,14 +462,13 @@ def score_new_jobs(all_jobs: list, progress=print, jobs_to_score: list | None = 
 
         # Reload to get the updated timestamp written by scrape(), then write scores back
         try:
-            with DATA_FILE.open() as f:
-                payload = json.load(f)
+            with _DATA_FILE_LOCK:
+                with DATA_FILE.open() as f:
+                    payload = json.load(f)
             updated = payload.get("updated", "")
         except Exception:
             updated = ""
-        with DATA_FILE.open("w") as f:
-            json.dump({"updated": updated, "jobs": all_jobs}, f,
-                      ensure_ascii=False, separators=(",", ":"))
+        _write_data_file({"updated": updated, "jobs": all_jobs})
 
         n_scored = sum(1 for s in scores.values() if s is not None)
         progress(f"scoring_done:{n_scored}/{len(to_score)}")
@@ -556,14 +572,13 @@ def _resume_scoring(progress) -> bool:
                 job["score"] = all_scores[url]
 
         try:
-            with DATA_FILE.open() as f:
-                existing = json.load(f)
+            with _DATA_FILE_LOCK:
+                with DATA_FILE.open() as f:
+                    existing = json.load(f)
             updated = existing.get("updated", "")
         except Exception:
             updated = ""
-        with DATA_FILE.open("w") as f:
-            json.dump({"updated": updated, "jobs": all_jobs}, f,
-                      ensure_ascii=False, separators=(",", ":"))
+        _write_data_file({"updated": updated, "jobs": all_jobs})
 
         n_scored = sum(1 for s in all_scores.values() if s is not None)
         progress(f"scoring_done:{n_scored}/{total}")
@@ -753,12 +768,12 @@ def save_persona_route():
     # Reset all scores so the new persona is applied to everything
     if DATA_FILE.exists():
         try:
-            with open(DATA_FILE) as f:
-                payload = json.load(f)
+            with _DATA_FILE_LOCK:
+                with open(DATA_FILE) as f:
+                    payload = json.load(f)
             for job in payload.get("jobs", []):
                 job["score"] = None
-            with open(DATA_FILE, "w") as f:
-                json.dump(payload, f, ensure_ascii=False, separators=(",", ":"))
+            _write_data_file(payload)
         except Exception as e:
             print(f"WARNING: could not reset scores: {e}", file=sys.stderr)
 

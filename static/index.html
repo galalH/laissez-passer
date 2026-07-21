@@ -1497,7 +1497,8 @@ function init() {
                   renderUpdatedAt();
                   el.classList.remove('refreshing');
                   renderList();
-                });
+                })
+                .catch(() => { el.classList.remove('refreshing'); renderUpdatedAt(); });
               return;
             }
             buffer += decoder.decode(value, { stream: true });
