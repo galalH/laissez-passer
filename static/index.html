@@ -765,9 +765,28 @@ function handleScoringStream(reader, onDone) {
       buffer = lines.pop();
       lines.forEach(processLine);
       read();
-    }).catch(() => { if (onDone) onDone(); });
+    }).catch(() => { reloadJobs(); if (onDone) onDone(); });
   }
   read();
+}
+
+// Poll /api/scoring-status; if a batch is still in flight, reattach to it.
+function autoResumeScoring() {
+  fetch('/api/scoring-status')
+    .then(r => r.json())
+    .then(function(status) {
+      if (!status.pending) return;
+      const el = document.getElementById('updated-at');
+      if (el.classList.contains('refreshing')) return;
+      el.classList.add('refreshing');
+      el.textContent = 'scoring in progress…';
+      fetch('/resume-scoring', { method: 'POST' })
+        .then(r => handleScoringStream(r.body.getReader(), function() {
+          el.classList.remove('refreshing');
+        }))
+        .catch(function() { el.classList.remove('refreshing'); renderUpdatedAt(); });
+    })
+    .catch(function() {});
 }
 
 function reloadJobs() {
@@ -897,11 +916,31 @@ function sortJobs(jobs) {
       return a.deadline < b.deadline ? -1 : a.deadline > b.deadline ? 1 : 0;
     });
   } else if (currentSort === 'relevance') {
-    arr.sort((a, b) => {
-      const sa = a.score != null ? a.score : -1;
-      const sb = b.score != null ? b.score : -1;
-      return sb - sa;
-    });
+    // Rank by score × fraction of the application window still open:
+    // (deadline − now) / (deadline − pubdate), clamped to [0, 1].
+    // Tiers: dated jobs first, then no-deadline and roster jobs by raw score
+    // (roster deadlines are usually unreal), then unscored / failed-scoring jobs.
+    const now = Date.now();
+    const isRoster = job =>
+      job.grade_category === 'Roster' || /\broster\b/i.test(job.job_title || '');
+    const key = job => {
+      if (job.score == null || job.score < 0) return [0, 0, 0];
+      if (!job.deadline || isRoster(job)) return [1, job.score, 0];
+      const deadline = new Date(job.deadline.length === 10 ? job.deadline + 'T23:59:59' : job.deadline).getTime();
+      const announced = new Date(job.pubdate || '').getTime();
+      const window = deadline - announced;
+      let left;
+      if (window > 0) {
+        left = Math.max(0, Math.min(1, (deadline - now) / window));
+      } else {
+        left = deadline >= now ? 1 : 0;
+      }
+      return [2, job.score * left, job.score];
+    };
+    const keyed = arr.map(j => [key(j), j]);
+    keyed.sort((a, b) =>
+      (b[0][0] - a[0][0]) || (b[0][1] - a[0][1]) || (b[0][2] - a[0][2]));
+    return keyed.map(p => p[1]);
   }
   return arr;
 }
@@ -1417,21 +1456,7 @@ function init() {
     });
 
     // Auto-resume batch scoring if a batch is still in flight from a prior refresh
-    fetch('/api/scoring-status')
-      .then(r => r.json())
-      .then(function(status) {
-        if (!status.pending) return;
-        const el = document.getElementById('updated-at');
-        if (el.classList.contains('refreshing')) return;
-        el.classList.add('refreshing');
-        el.textContent = 'scoring in progress…';
-        fetch('/resume-scoring', { method: 'POST' })
-          .then(r => handleScoringStream(r.body.getReader(), function() {
-            el.classList.remove('refreshing');
-          }))
-          .catch(function() { el.classList.remove('refreshing'); renderUpdatedAt(); });
-      })
-      .catch(function() {});
+    autoResumeScoring();
   });
 
   // Refresh
@@ -1506,6 +1531,12 @@ function init() {
             buffer = lines.pop();
             lines.forEach(processLine);
             read();
+          }).catch(() => {
+            // Stream dropped (network blip, sleep). Unlock the UI and, if a
+            // batch is still running server-side, reattach to it.
+            el.classList.remove('refreshing');
+            reloadJobs();
+            autoResumeScoring();
           });
         }
         read();

@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Laissez-Passer — Flask app and scraper driver."""
 
+import hashlib
 import importlib.util
 import io
 import json
@@ -275,10 +276,12 @@ def scrape(progress=print):
             progress(f"progress:{n}/{total}:{agency}:{len(jobs)}")
 
     # Carry over existing scores so only genuinely new jobs get re-scored.
+    harvested_batches: list = []
     if DATA_FILE.exists():
         try:
             with open(DATA_FILE) as f:
                 old_payload = json.load(f)
+            harvested_batches = old_payload.get("harvested_batches", [])
             old_scores = {
                 job["url"]: job["score"]
                 for job in old_payload.get("jobs", [])
@@ -292,7 +295,7 @@ def scrape(progress=print):
             pass
 
     DATA_FILE.parent.mkdir(parents=True, exist_ok=True)
-    _write_data_file({"updated": now, "jobs": all_jobs})
+    _write_data_file({"updated": now, "jobs": all_jobs, "harvested_batches": harvested_batches})
 
     suffix = f" · {warning_count} warnings" if warning_count else ""
     progress(f"done:{len(all_jobs)} jobs from {agency_count} agencies{suffix}")
@@ -323,6 +326,46 @@ _SCORE_TOOL = {
 _SCORE_TOOL_CHOICE = {"type": "function", "function": {"name": "record_score"}}
 
 _PERSONA_FILE = BASE_DIR / "static" / "persona.md"
+
+_APP_BATCH_TAG = "laissez-passer"
+
+
+def _persona_fingerprint() -> str:
+    """Short hash of the current persona, stamped onto batches so results from
+    a stale persona are never applied after the persona changes."""
+    try:
+        return hashlib.sha1(_PERSONA_FILE.read_text().strip().encode()).hexdigest()[:12]
+    except Exception:
+        return ""
+
+
+def _our_batches(batches) -> list:
+    """Filter an OpenAI batch listing down to batches this app created for the
+    current persona (other tools may share the same API key)."""
+    tag = _persona_fingerprint()
+    ours = []
+    for b in batches:
+        md = getattr(b, "metadata", None) or {}
+        if md.get("app") == _APP_BATCH_TAG and md.get("persona") == tag:
+            ours.append(b)
+    return ours
+
+
+def _merge_harvested(existing: list, new_ids: list) -> list:
+    """Union of already-harvested batch ids, order-preserving, capped."""
+    return list(dict.fromkeys([*existing, *new_ids]))[-200:]
+
+
+def _apply_scores(jobs: list, scores: dict) -> int:
+    """Fill scores into still-unscored jobs by url. A result that yielded no
+    usable score becomes -1 so the job is not re-submitted on every refresh."""
+    n = 0
+    for job in jobs:
+        url = job.get("url")
+        if url and job.get("score") is None and url in scores:
+            job["score"] = scores[url] if scores[url] is not None else -1
+            n += 1
+    return n
 
 
 def _build_score_message(job: dict) -> str:
@@ -407,6 +450,7 @@ def score_new_jobs(all_jobs: list, progress=print, jobs_to_score: list | None = 
         # ── Process batches sequentially: submit → wait → collect → next ──────
         _TERMINAL = {"completed", "failed", "expired", "cancelled"}
         scores: dict[str, float | None] = {}
+        harvested_ids: list[str] = []
         jobs_done = 0  # cumulative across completed batches
 
         for batch_requests in batches:
@@ -436,6 +480,7 @@ def score_new_jobs(all_jobs: list, progress=print, jobs_to_score: list | None = 
                 input_file_id=batch_file.id,
                 endpoint="/v1/chat/completions",
                 completion_window="24h",
+                metadata={"app": _APP_BATCH_TAG, "persona": _persona_fingerprint()},
             )
 
             started_at = time.monotonic()
@@ -450,25 +495,35 @@ def score_new_jobs(all_jobs: list, progress=print, jobs_to_score: list | None = 
 
             if batch.status != "completed":
                 progress(f"scoring_skip:batch ended with status {batch.status}")
-            else:
+            # Expired batches can still carry partial results in their output file
+            output_id = getattr(batch, "output_file_id", None)
+            if output_id:
                 scores.update(_parse_batch_scores(
-                    client.files.content(batch.output_file_id).text
+                    client.files.content(output_id).text
                 ))
+                harvested_ids.append(batch.id)
 
             jobs_done += len(batch_requests)
 
         for job_id, job in to_score:
-            job["score"] = scores.get(job_id)
+            if job_id in scores:
+                s = scores[job_id]
+                job["score"] = s if s is not None else -1
 
         # Reload to get the updated timestamp written by scrape(), then write scores back
         try:
             with _DATA_FILE_LOCK:
                 with DATA_FILE.open() as f:
                     payload = json.load(f)
-            updated = payload.get("updated", "")
         except Exception:
-            updated = ""
-        _write_data_file({"updated": updated, "jobs": all_jobs})
+            payload = {}
+        _write_data_file({
+            "updated": payload.get("updated", ""),
+            "jobs": all_jobs,
+            "harvested_batches": _merge_harvested(
+                payload.get("harvested_batches", []), harvested_ids
+            ),
+        })
 
         n_scored = sum(1 for s in scores.values() if s is not None)
         progress(f"scoring_done:{n_scored}/{len(to_score)}")
@@ -522,16 +577,48 @@ def _resume_scoring(progress) -> bool:
         _ACTIVE    = {"validating", "in_progress", "finalizing"}
         _TERMINAL  = {"completed", "failed", "expired", "cancelled"}
 
-        active_batches = [b for b in client.batches.list() if b.status in _ACTIVE]
-        if not active_batches:
-            return False
-
         if not DATA_FILE.exists():
             return False
+
+        # Only the most recent page — iterating the listing auto-paginates
+        # through the entire account history.
+        recent = _our_batches(client.batches.list(limit=100).data)
+        active_batches = [b for b in recent if b.status in _ACTIVE]
 
         with open(DATA_FILE) as f:
             payload = json.load(f)
         all_jobs = payload.get("jobs", [])
+        harvested = payload.get("harvested_batches", [])
+
+        # Harvest terminal batches whose results were never collected (e.g. the
+        # server stopped while they were in flight and they finished offline).
+        leftovers = [
+            b for b in recent
+            if b.status in _TERMINAL and b.id not in harvested
+            and getattr(b, "output_file_id", None)
+        ]
+        if leftovers:
+            left_scores: dict[str, float | None] = {}
+            done_ids = []
+            for b in leftovers:
+                try:
+                    left_scores.update(_parse_batch_scores(
+                        client.files.content(b.output_file_id).text
+                    ))
+                    done_ids.append(b.id)
+                except Exception:
+                    continue
+            if done_ids:
+                applied = _apply_scores(all_jobs, left_scores)
+                harvested = _merge_harvested(harvested, done_ids)
+                payload = {**payload, "jobs": all_jobs, "harvested_batches": harvested}
+                _write_data_file(payload)
+                if applied:
+                    progress(f"scoring_done:{applied}/{applied}")
+
+        if not active_batches:
+            return False
+
         source = _apply_filter(all_jobs)
         total = sum(1 for job in source if job.get("score") is None)
 
@@ -542,6 +629,7 @@ def _resume_scoring(progress) -> bool:
 
         batch_objs = {b.id: b for b in active_batches}
         still_active = set(batch_objs)
+        retrieve_failures: dict[str, int] = {}
         started_at = time.monotonic()
 
         while still_active:
@@ -549,7 +637,13 @@ def _resume_scoring(progress) -> bool:
                 try:
                     b = client.batches.retrieve(bid)
                 except Exception:
+                    # Give up on a batch we can no longer see rather than
+                    # polling it forever.
+                    retrieve_failures[bid] = retrieve_failures.get(bid, 0) + 1
+                    if retrieve_failures[bid] >= 30:
+                        still_active.discard(bid)
                     continue
+                retrieve_failures[bid] = 0
                 batch_objs[bid] = b
                 if b.status in _TERMINAL:
                     still_active.discard(bid)
@@ -560,25 +654,33 @@ def _resume_scoring(progress) -> bool:
                 time.sleep(10)
 
         all_scores: dict[str, float | None] = {}
+        done_ids = []
         for b in batch_objs.values():
             if b.status != "completed":
                 progress(f"scoring_skip:batch ended with status {b.status}")
-                continue
-            all_scores.update(_parse_batch_scores(client.files.content(b.output_file_id).text))
+            output_id = getattr(b, "output_file_id", None)
+            if output_id:
+                try:
+                    all_scores.update(_parse_batch_scores(client.files.content(output_id).text))
+                    done_ids.append(b.id)
+                except Exception:
+                    continue
 
-        for job in all_jobs:
-            url = job.get("url")
-            if url and url in all_scores:
-                job["score"] = all_scores[url]
+        _apply_scores(all_jobs, all_scores)
 
         try:
             with _DATA_FILE_LOCK:
                 with DATA_FILE.open() as f:
                     existing = json.load(f)
-            updated = existing.get("updated", "")
         except Exception:
-            updated = ""
-        _write_data_file({"updated": updated, "jobs": all_jobs})
+            existing = {}
+        _write_data_file({
+            "updated": existing.get("updated", ""),
+            "jobs": all_jobs,
+            "harvested_batches": _merge_harvested(
+                existing.get("harvested_batches", harvested), done_ids
+            ),
+        })
 
         n_scored = sum(1 for s in all_scores.values() if s is not None)
         progress(f"scoring_done:{n_scored}/{total}")
@@ -604,8 +706,8 @@ DataFrame columns:
   country name. Special values: "XRM" = Home Based/Remote, "XMU" = Multiple Locations,
   "XXX" = unknown. Examples: "FRA", "USA", "KEN", "CHE", "DEU", "GBR", "ETH", "TZA"
 - deadline: str or None — calendar date "YYYY-MM-DD", e.g. "2026-06-30"
-- pubdate: str — first-seen timestamp "YYYY-MM-DDTHH:MM:SS+HH:MM", e.g. "2026-04-14T10:00:00+02:00"
-- score: float or None — relevance score 0.0–1.0
+- pubdate: str — first-seen calendar date "YYYY-MM-DD", e.g. "2026-04-14"
+- score: float or None — relevance score 0.0–1.0; -1 means scoring failed; None means not yet scored
 
 Canonical grade values by category:
   Professional:     P-1  P-2  P-3  P-4  P-5
@@ -696,7 +798,7 @@ def _validate_filter(pandas_query: str) -> tuple[bool, str]:
         "job_title": ["Data Analyst"], "grade": ["P-4"],
         "grade_category": ["Professional"], "city": ["New York"],
         "country_iso3": ["USA"],
-        "deadline": ["2026-06-01"], "pubdate": ["2026-04-14T10:00:00+02:00"],
+        "deadline": ["2026-06-01"], "pubdate": ["2026-04-14"],
         "score": [0.5],
     }
     df = pd.DataFrame(test_data)
@@ -875,7 +977,8 @@ def api_scoring_status():
         import openai
         client = openai.OpenAI(api_key=api_key, max_retries=0)
         _ACTIVE = {"validating", "in_progress", "finalizing"}
-        active = [b for b in client.batches.list() if b.status in _ACTIVE]
+        # First page only — iterating the listing auto-paginates the full history
+        active = [b for b in _our_batches(client.batches.list(limit=20).data) if b.status in _ACTIVE]
         return jsonify({"pending": bool(active), "count": len(active)})
     except Exception:
         return jsonify({"pending": False})
