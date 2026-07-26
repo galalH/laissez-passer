@@ -916,30 +916,16 @@ function sortJobs(jobs) {
       return a.deadline < b.deadline ? -1 : a.deadline > b.deadline ? 1 : 0;
     });
   } else if (currentSort === 'relevance') {
-    // Rank by score × fraction of the application window still open:
-    // (deadline − now) / (deadline − pubdate), clamped to [0, 1].
-    // Tiers: dated jobs first, then no-deadline and roster jobs by raw score
-    // (roster deadlines are usually unreal), then unscored / failed-scoring jobs.
-    const now = Date.now();
+    // Rank by raw score. Tiers: scored jobs first, then roster jobs by score,
+    // then unscored / failed-scoring jobs last.
     const isRoster = job =>
       job.grade_category === 'Roster' || /\broster\b/i.test(job.job_title || '');
     const key = job => {
-      if (job.score == null || job.score < 0) return [0, 0, 0];
-      if (!job.deadline || isRoster(job)) return [1, job.score, 0];
-      const deadline = new Date(job.deadline.length === 10 ? job.deadline + 'T23:59:59' : job.deadline).getTime();
-      const announced = new Date(job.pubdate || '').getTime();
-      const window = deadline - announced;
-      let left;
-      if (window > 0) {
-        left = Math.max(0, Math.min(1, (deadline - now) / window));
-      } else {
-        left = deadline >= now ? 1 : 0;
-      }
-      return [2, job.score * left, job.score];
+      if (job.score == null || job.score < 0) return [0, 0];
+      return [isRoster(job) ? 1 : 2, job.score];
     };
     const keyed = arr.map(j => [key(j), j]);
-    keyed.sort((a, b) =>
-      (b[0][0] - a[0][0]) || (b[0][1] - a[0][1]) || (b[0][2] - a[0][2]));
+    keyed.sort((a, b) => (b[0][0] - a[0][0]) || (b[0][1] - a[0][1]));
     return keyed.map(p => p[1]);
   }
   return arr;
