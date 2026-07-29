@@ -275,6 +275,10 @@ def scrape(progress=print):
                 agency_count += 1
             progress(f"progress:{n}/{total}:{agency}:{len(jobs)}")
 
+    # Flag jobs that were not present in the previous snapshot ("latest" tab).
+    for job in all_jobs:
+        job["is_new"] = job.get("url") not in previous
+
     # Carry over existing scores so only genuinely new jobs get re-scored.
     harvested_batches: list = []
     if DATA_FILE.exists():

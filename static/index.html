@@ -536,7 +536,9 @@ body {
       <div id="sort-controls">
         <span id="sort-label">sort by</span>
         <span class="sort-sep">·</span>
-        <span class="sort-opt active" data-sort="relevance">relevance</span>
+        <span class="sort-opt active" data-sort="latest">latest</span>
+        <span class="sort-sep">·</span>
+        <span class="sort-opt" data-sort="relevance">relevance</span>
         <span class="sort-sep">·</span>
         <span class="sort-opt" data-sort="new">new</span>
         <span class="sort-sep">·</span>
@@ -652,7 +654,7 @@ marked.use({ gfm: true, breaks: false });
 let allJobs = [];
 let filtered = [];
 let currentSorted = [];
-let currentSort = 'relevance';
+let currentSort = 'latest';
 let currentPage = 1;
 let PAGE_SIZE = 20;
 let resizeTimer = null;
@@ -672,7 +674,7 @@ function updateRelevanceSortState() {
   const enabled = hasPersona || hasFilter;
   el.classList.toggle('disabled', !enabled);
   if (!enabled && currentSort === 'relevance') {
-    currentSort = 'new';
+    currentSort = 'latest';
     document.querySelectorAll('.sort-opt').forEach(s => {
       s.classList.toggle('active', s.dataset.sort === currentSort);
     });
@@ -916,19 +918,26 @@ function sortJobs(jobs) {
       return a.deadline < b.deadline ? -1 : a.deadline > b.deadline ? 1 : 0;
     });
   } else if (currentSort === 'relevance') {
-    // Rank by raw score. Tiers: scored jobs first, then roster jobs by score,
-    // then unscored / failed-scoring jobs last.
-    const isRoster = job =>
-      job.grade_category === 'Roster' || /\broster\b/i.test(job.job_title || '');
-    const key = job => {
-      if (job.score == null || job.score < 0) return [0, 0];
-      return [isRoster(job) ? 1 : 2, job.score];
-    };
-    const keyed = arr.map(j => [key(j), j]);
-    keyed.sort((a, b) => (b[0][0] - a[0][0]) || (b[0][1] - a[0][1]));
-    return keyed.map(p => p[1]);
+    return rankByScore(arr);
+  } else if (currentSort === 'latest') {
+    // Only listings that appeared in the last refresh, best-scored first.
+    return rankByScore(arr.filter(j => j.is_new));
   }
   return arr;
+}
+
+// Rank by raw score. Tiers: scored jobs first, then roster jobs by score,
+// then unscored / failed-scoring jobs last.
+function rankByScore(jobs) {
+  const isRoster = job =>
+    job.grade_category === 'Roster' || /\broster\b/i.test(job.job_title || '');
+  const key = job => {
+    if (job.score == null || job.score < 0) return [0, 0];
+    return [isRoster(job) ? 1 : 2, job.score];
+  };
+  const keyed = jobs.map(j => [key(j), j]);
+  keyed.sort((a, b) => (b[0][0] - a[0][0]) || (b[0][1] - a[0][1]));
+  return keyed.map(p => p[1]);
 }
 
 function applySearch(query) {
@@ -1272,7 +1281,7 @@ document.addEventListener('keydown', function(e) {
       document.getElementById('search').focus();
       break;
     case 's': {
-      const sorts = ['relevance', 'new', 'deadline'];
+      const sorts = ['latest', 'relevance', 'new', 'deadline'];
       currentSort = sorts[(sorts.indexOf(currentSort) + 1) % sorts.length];
       document.querySelectorAll('.sort-opt').forEach(el => {
         el.classList.toggle('active', el.dataset.sort === currentSort);
@@ -1408,12 +1417,6 @@ function init() {
   Promise.all([configP, dataP]).then(function([cfg, data]) {
     hasPersona = cfg.has_persona || false;
     hasFilter  = cfg.has_filter  || false;
-    if (!hasPersona && !hasFilter) {
-      currentSort = 'new';
-      document.querySelectorAll('.sort-opt').forEach(el => {
-        el.classList.toggle('active', el.dataset.sort === currentSort);
-      });
-    }
     updateRelevanceSortState();
 
     if (data._noData) {
