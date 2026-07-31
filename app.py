@@ -389,7 +389,7 @@ def _build_score_message(job: dict) -> str:
 
 
 def score_new_jobs(all_jobs: list, progress=print, jobs_to_score: list | None = None) -> None:
-    """Score jobs that are missing a score using GPT-5.4-nano via OpenAI Batch API.
+    """Score jobs that are missing a score using GPT-5.6-luna via OpenAI Batch API.
 
     all_jobs is the full list written back to disk.  jobs_to_score is the subset
     that should be scored (must be references into all_jobs); defaults to all_jobs.
@@ -464,7 +464,7 @@ def score_new_jobs(all_jobs: list, progress=print, jobs_to_score: list | None = 
                     "method": "POST",
                     "url": "/v1/chat/completions",
                     "body": {
-                        "model": "gpt-5.4-nano",
+                        "model": "gpt-5.6-luna",
                         "max_completion_tokens": 64,
                         "tools": [_SCORE_TOOL],
                         "tool_choice": _SCORE_TOOL_CHOICE,
@@ -759,7 +759,7 @@ def _apply_filter(all_jobs: list) -> list:
 
 
 def _translate_filter(natural_language: str, prev_query: str = "", error: str = "") -> str:
-    """Call GPT nano to translate natural language to a pandas query string."""
+    """Call GPT Luna to translate natural language to a pandas query string."""
     try:
         import openai
     except ImportError:
@@ -784,7 +784,7 @@ def _translate_filter(natural_language: str, prev_query: str = "", error: str = 
             {"role": "user", "content": f"That query failed with: {error}\nProvide a corrected query."},
         ]
     resp = client.chat.completions.create(
-        model="gpt-5.4-nano",
+        model="gpt-5.6-luna",
         messages=messages,
         max_completion_tokens=200,
     )
