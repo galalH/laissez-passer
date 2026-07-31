@@ -311,23 +311,21 @@ def scrape(progress=print):
 
 _SCORE_TOOL = {
     "type": "function",
-    "function": {
-        "name": "record_score",
-        "description": "Record the relevance score for the job listing.",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "score": {
-                    "type": "number",
-                    "description": "Relevance score between 0.0 and 1.0",
-                }
-            },
-            "required": ["score"],
+    "name": "record_score",
+    "description": "Record the relevance score for the job listing.",
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "score": {
+                "type": "number",
+                "description": "Relevance score between 0.0 and 1.0",
+            }
         },
+        "required": ["score"],
     },
 }
 
-_SCORE_TOOL_CHOICE = {"type": "function", "function": {"name": "record_score"}}
+_SCORE_TOOL_CHOICE = {"type": "function", "name": "record_score"}
 
 _PERSONA_FILE = BASE_DIR / "static" / "persona.md"
 
@@ -462,16 +460,14 @@ def score_new_jobs(all_jobs: list, progress=print, jobs_to_score: list | None = 
                 json.dumps({
                     "custom_id": job_id,
                     "method": "POST",
-                    "url": "/v1/chat/completions",
+                    "url": "/v1/responses",
                     "body": {
                         "model": "gpt-5.6-luna",
-                        "max_completion_tokens": 64,
+                        "max_output_tokens": 64,
+                        "instructions": persona,
+                        "input": user_msg,
                         "tools": [_SCORE_TOOL],
                         "tool_choice": _SCORE_TOOL_CHOICE,
-                        "messages": [
-                            {"role": "system", "content": persona},
-                            {"role": "user", "content": user_msg},
-                        ],
                     },
                 })
                 for job_id, _job, user_msg in batch_requests
@@ -482,7 +478,7 @@ def score_new_jobs(all_jobs: list, progress=print, jobs_to_score: list | None = 
             )
             batch = client.batches.create(
                 input_file_id=batch_file.id,
-                endpoint="/v1/chat/completions",
+                endpoint="/v1/responses",
                 completion_window="24h",
                 metadata={"app": _APP_BATCH_TAG, "persona": _persona_fingerprint()},
             )
@@ -545,14 +541,12 @@ def _parse_batch_scores(result_text: str) -> dict[str, float | None]:
         if row.get("error"):
             scores[idx] = None
             continue
-        tool_calls = row["response"]["body"]["choices"][0]["message"].get("tool_calls", [])
+        output = row["response"]["body"].get("output", [])
         score = None
-        for tc in tool_calls:
-            name = tc["function"]["name"] if isinstance(tc, dict) else tc.function.name
-            args = tc["function"]["arguments"] if isinstance(tc, dict) else tc.function.arguments
-            if name == "record_score":
+        for item in output:
+            if item.get("type") == "function_call" and item.get("name") == "record_score":
                 try:
-                    score = float(json.loads(args)["score"])
+                    score = float(json.loads(item["arguments"])["score"])
                 except (KeyError, TypeError, ValueError, json.JSONDecodeError):
                     pass
                 break
