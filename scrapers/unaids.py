@@ -277,7 +277,11 @@ def scrape() -> list[dict]:
     with ThreadPoolExecutor(max_workers=10) as ex:
         futures = [(s, ex.submit(_fetch_description, session, s["url"])) for s in stubs]
 
-    return [{**stub, "description": desc, "pubdate": pubdate} for stub, (desc, pubdate) in futures]
+    jobs = []
+    for stub, fut in futures:
+        desc, pubdate = fut.result()
+        jobs.append({**stub, "description": desc, "pubdate": pubdate})
+    return jobs
 
 
 if __name__ == "__main__":
