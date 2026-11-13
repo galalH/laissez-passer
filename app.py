@@ -1,9 +1,7 @@
 #!/usr/bin/env python3
 """Laissez-Passer — Flask app and scraper driver."""
 
-import hashlib
 import importlib.util
-import io
 import json
 import logging
 import os
@@ -202,6 +200,14 @@ def _load_previous_jobs() -> dict[str, str]:
     return {}
 
 
+def _load_previous_jobs_list() -> list[dict]:
+    if DATA_FILE.exists():
+        with open(DATA_FILE) as f:
+            payload = json.load(f)
+        return payload.get("jobs", payload) if isinstance(payload, dict) else payload
+    return []
+
+
 def _discover_plugins() -> list:
     modules = []
     for py_file in sorted(SCRAPERS_DIR.glob("*.py")):
@@ -254,6 +260,8 @@ def scrape(progress=print):
             warnings.append(f"WARNING: {agency} scrape failed: {e}")
             return agency, [], warnings
 
+    succeeded_agencies = set()
+
     with ThreadPoolExecutor(max_workers=8) as executor:
         futures = {executor.submit(run_plugin, p): p for p in plugins}
         n = 0
@@ -273,19 +281,28 @@ def scrape(progress=print):
                         warning_count += 1
                 all_jobs.extend(jobs)
                 agency_count += 1
+                succeeded_agencies.add(agency)
             progress(f"progress:{n}/{total}:{agency}:{len(jobs)}")
 
     # Flag jobs that were not present in the previous snapshot ("latest" tab).
     for job in all_jobs:
         job["is_new"] = job.get("url") not in previous
 
+    # An agency that returned nothing this run (transient failure, 0 jobs, a
+    # scraper temporarily down) would otherwise vanish from data.json — then
+    # reappear as a wall of false "new" postings once it recovers. Carry its
+    # last known jobs forward instead of dropping them.
+    known_urls = {job.get("url") for job in all_jobs if job.get("url")}
+    for job in _load_previous_jobs_list():
+        if job.get("agency") not in succeeded_agencies and job.get("url") not in known_urls:
+            job["is_new"] = False
+            all_jobs.append(job)
+
     # Carry over existing scores so only genuinely new jobs get re-scored.
-    harvested_batches: list = []
     if DATA_FILE.exists():
         try:
             with open(DATA_FILE) as f:
                 old_payload = json.load(f)
-            harvested_batches = old_payload.get("harvested_batches", [])
             old_scores = {
                 job["url"]: job["score"]
                 for job in old_payload.get("jobs", [])
@@ -299,7 +316,7 @@ def scrape(progress=print):
             pass
 
     DATA_FILE.parent.mkdir(parents=True, exist_ok=True)
-    _write_data_file({"updated": now, "jobs": all_jobs, "harvested_batches": harvested_batches})
+    _write_data_file({"updated": now, "jobs": all_jobs})
 
     suffix = f" · {warning_count} warnings" if warning_count else ""
     progress(f"done:{len(all_jobs)} jobs from {agency_count} agencies{suffix}")
@@ -329,45 +346,8 @@ _SCORE_TOOL_CHOICE = {"type": "function", "name": "record_score"}
 
 _PERSONA_FILE = BASE_DIR / "static" / "persona.md"
 
-_APP_BATCH_TAG = "laissez-passer"
-
-
-def _persona_fingerprint() -> str:
-    """Short hash of the current persona, stamped onto batches so results from
-    a stale persona are never applied after the persona changes."""
-    try:
-        return hashlib.sha1(_PERSONA_FILE.read_text().strip().encode()).hexdigest()[:12]
-    except Exception:
-        return ""
-
-
-def _our_batches(batches) -> list:
-    """Filter an OpenAI batch listing down to batches this app created for the
-    current persona (other tools may share the same API key)."""
-    tag = _persona_fingerprint()
-    ours = []
-    for b in batches:
-        md = getattr(b, "metadata", None) or {}
-        if md.get("app") == _APP_BATCH_TAG and md.get("persona") == tag:
-            ours.append(b)
-    return ours
-
-
-def _merge_harvested(existing: list, new_ids: list) -> list:
-    """Union of already-harvested batch ids, order-preserving, capped."""
-    return list(dict.fromkeys([*existing, *new_ids]))[-200:]
-
-
-def _apply_scores(jobs: list, scores: dict) -> int:
-    """Fill scores into still-unscored jobs by url. A result that yielded no
-    usable score becomes -1 so the job is not re-submitted on every refresh."""
-    n = 0
-    for job in jobs:
-        url = job.get("url")
-        if url and job.get("score") is None and url in scores:
-            job["score"] = scores[url] if scores[url] is not None else -1
-            n += 1
-    return n
+_SCORE_MODEL = "gpt-6-luna"
+_SCORE_WORKERS = 8
 
 
 def _build_score_message(job: dict) -> str:
@@ -386,8 +366,19 @@ def _build_score_message(job: dict) -> str:
     )
 
 
+def _extract_score(response) -> float | None:
+    """Pull the record_score argument out of a Responses API result."""
+    for item in response.output:
+        if getattr(item, "type", None) == "function_call" and item.name == "record_score":
+            try:
+                return float(json.loads(item.arguments)["score"])
+            except (KeyError, TypeError, ValueError, json.JSONDecodeError):
+                return None
+    return None
+
+
 def score_new_jobs(all_jobs: list, progress=print, jobs_to_score: list | None = None) -> None:
-    """Score jobs that are missing a score using GPT-5.6-luna via OpenAI Batch API.
+    """Score jobs that are missing a score using gpt-6-luna via the Responses API.
 
     all_jobs is the full list written back to disk.  jobs_to_score is the subset
     that should be scored (must be references into all_jobs); defaults to all_jobs.
@@ -410,105 +401,55 @@ def score_new_jobs(all_jobs: list, progress=print, jobs_to_score: list | None = 
     try:
         persona = _PERSONA_FILE.read_text().strip()
         source = jobs_to_score if jobs_to_score is not None else all_jobs
-
-        to_score = [
-            (job.get("url") or str(i), job) for i, job in enumerate(source)
-            if job.get("score") is None
-        ]
+        to_score = [job for job in source if job.get("score") is None]
 
         if not to_score:
             progress("scoring_skip:all jobs already scored")
             return
 
-        client = openai.OpenAI(api_key=api_key, max_retries=2)
+        # Retries with backoff cover transient 429s / 5xx from parallel calls.
+        client = openai.OpenAI(api_key=api_key, max_retries=5)
 
-        # ── Split into token-capped batches ───────────────────────────────────
-        # Rough estimate: 1 token ≈ 4 chars.  Each request costs:
-        #   persona (fixed) + tool definition (~100 tok) + user message + 64 output + ~50 overhead
-        _BATCH_TOKEN_TARGET = int(2_000_000 * 0.8)  # 1.6 M tokens per batch
-        _FIXED_PER_REQ = (len(persona) // 4) + 100 + 64 + 50
-
-        requests: list[tuple[str, dict, str]] = [
-            (job_id, job, _build_score_message(job)) for job_id, job in to_score
-        ]
-
-        batches: list[list[tuple[str, dict, str]]] = []
-        current: list[tuple[str, dict, str]] = []
-        current_tokens = 0
-        for job_id, job, user_msg in requests:
-            tokens = _FIXED_PER_REQ + len(user_msg) // 4
-            if current and current_tokens + tokens > _BATCH_TOKEN_TARGET:
-                batches.append(current)
-                current = [(job_id, job, user_msg)]
-                current_tokens = tokens
-            else:
-                current.append((job_id, job, user_msg))
-                current_tokens += tokens
-        if current:
-            batches.append(current)
+        def score_one(job: dict) -> float | None:
+            # Luna occasionally returns an empty "incomplete" response; one
+            # retry recovers it without marking the job -1.
+            for _ in range(2):
+                response = client.responses.create(
+                    model=_SCORE_MODEL,
+                    max_output_tokens=256,
+                    instructions=persona,
+                    input=_build_score_message(job),
+                    tools=[_SCORE_TOOL],
+                    tool_choice=_SCORE_TOOL_CHOICE,
+                )
+                score = _extract_score(response)
+                if score is not None:
+                    return score
+            return None
 
         progress(f"scoring_start:{len(to_score)}")
+        started_at = time.monotonic()
+        n_done = n_scored = n_failed = 0
+        last_error = ""
 
-        # ── Process batches sequentially: submit → wait → collect → next ──────
-        _TERMINAL = {"completed", "failed", "expired", "cancelled"}
-        scores: dict[str, float | None] = {}
-        harvested_ids: list[str] = []
-        jobs_done = 0  # cumulative across completed batches
-
-        for batch_requests in batches:
-            lines = [
-                json.dumps({
-                    "custom_id": job_id,
-                    "method": "POST",
-                    "url": "/v1/responses",
-                    "body": {
-                        "model": "gpt-5.6-luna",
-                        "max_output_tokens": 64,
-                        "instructions": persona,
-                        "input": user_msg,
-                        "tools": [_SCORE_TOOL],
-                        "tool_choice": _SCORE_TOOL_CHOICE,
-                    },
-                })
-                for job_id, _job, user_msg in batch_requests
-            ]
-            batch_file = client.files.create(
-                file=("score.jsonl", io.BytesIO("\n".join(lines).encode()), "application/jsonl"),
-                purpose="batch",
-            )
-            batch = client.batches.create(
-                input_file_id=batch_file.id,
-                endpoint="/v1/responses",
-                completion_window="24h",
-                metadata={"app": _APP_BATCH_TAG, "persona": _persona_fingerprint()},
-            )
-
-            started_at = time.monotonic()
-            while batch.status not in _TERMINAL:
-                time.sleep(10)
+        with ThreadPoolExecutor(max_workers=_SCORE_WORKERS) as executor:
+            futures = {executor.submit(score_one, job): job for job in to_score}
+            for future in as_completed(futures):
+                job = futures[future]
+                n_done += 1
                 try:
-                    batch = client.batches.retrieve(batch.id)
-                except Exception:
-                    continue
+                    score = future.result()
+                except Exception as e:
+                    # Leave the job unscored so the next refresh retries it.
+                    n_failed += 1
+                    last_error = str(e)
+                else:
+                    # A response with no usable score becomes -1 so the job is
+                    # not re-submitted on every refresh.
+                    job["score"] = score if score is not None else -1
+                    n_scored += score is not None
                 elapsed = int(time.monotonic() - started_at)
-                progress(f"scoring:{jobs_done + batch.request_counts.completed}:{len(to_score)}:{elapsed}")
-
-            if batch.status != "completed":
-                progress(f"scoring_skip:batch ended with status {batch.status}")
-            # Expired batches can still carry partial results in their output file
-            output_id = getattr(batch, "output_file_id", None)
-            if output_id:
-                scores.update(_parse_batch_scores(
-                    client.files.content(output_id).text
-                ))
-                harvested_ids.append(batch.id)
-
-            jobs_done += len(batch_requests)
-
-        for job_id, job in to_score:
-            if job_id in scores:
-                s = scores[job_id]
-                job["score"] = s if s is not None else -1
+                progress(f"scoring:{n_done}:{len(to_score)}:{elapsed}")
 
         # Reload to get the updated timestamp written by scrape(), then write scores back
         try:
@@ -517,176 +458,14 @@ def score_new_jobs(all_jobs: list, progress=print, jobs_to_score: list | None = 
                     payload = json.load(f)
         except Exception:
             payload = {}
-        _write_data_file({
-            "updated": payload.get("updated", ""),
-            "jobs": all_jobs,
-            "harvested_batches": _merge_harvested(
-                payload.get("harvested_batches", []), harvested_ids
-            ),
-        })
+        _write_data_file({"updated": payload.get("updated", ""), "jobs": all_jobs})
 
-        n_scored = sum(1 for s in scores.values() if s is not None)
+        if n_failed:
+            progress(f"scoring_skip:{n_failed} requests failed ({last_error})")
         progress(f"scoring_done:{n_scored}/{len(to_score)}")
 
     except Exception as e:
         progress(f"scoring_skip:scoring failed ({e})")
-
-
-def _parse_batch_scores(result_text: str) -> dict[str, float | None]:
-    """Parse OpenAI batch output JSONL into {custom_id -> score}."""
-    scores: dict[str, float | None] = {}
-    for line in result_text.strip().splitlines():
-        row = json.loads(line)
-        idx = row["custom_id"]
-        if row.get("error"):
-            scores[idx] = None
-            continue
-        output = row["response"]["body"].get("output", [])
-        score = None
-        for item in output:
-            if item.get("type") == "function_call" and item.get("name") == "record_score":
-                try:
-                    score = float(json.loads(item["arguments"])["score"])
-                except (KeyError, TypeError, ValueError, json.JSONDecodeError):
-                    pass
-                break
-        scores[idx] = score
-    return scores
-
-
-def _resume_scoring(progress) -> bool:
-    """Check for active OpenAI batches and poll them to completion.
-
-    Returns True if active batches were found (caller should skip scraping),
-    False if there is nothing in flight.
-    """
-    api_key = os.environ.get("OPENAI_API_KEY")
-    if not api_key:
-        return False
-
-    try:
-        import openai
-    except ImportError:
-        return False
-
-    try:
-        client = openai.OpenAI(api_key=api_key, max_retries=2)
-
-        _ACTIVE    = {"validating", "in_progress", "finalizing"}
-        _TERMINAL  = {"completed", "failed", "expired", "cancelled"}
-
-        if not DATA_FILE.exists():
-            return False
-
-        # Only the most recent page — iterating the listing auto-paginates
-        # through the entire account history.
-        recent = _our_batches(client.batches.list(limit=100).data)
-        active_batches = [b for b in recent if b.status in _ACTIVE]
-
-        with open(DATA_FILE) as f:
-            payload = json.load(f)
-        all_jobs = payload.get("jobs", [])
-        harvested = payload.get("harvested_batches", [])
-
-        # Harvest terminal batches whose results were never collected (e.g. the
-        # server stopped while they were in flight and they finished offline).
-        leftovers = [
-            b for b in recent
-            if b.status in _TERMINAL and b.id not in harvested
-            and getattr(b, "output_file_id", None)
-        ]
-        if leftovers:
-            left_scores: dict[str, float | None] = {}
-            done_ids = []
-            for b in leftovers:
-                try:
-                    left_scores.update(_parse_batch_scores(
-                        client.files.content(b.output_file_id).text
-                    ))
-                    done_ids.append(b.id)
-                except Exception:
-                    continue
-            if done_ids:
-                applied = _apply_scores(all_jobs, left_scores)
-                harvested = _merge_harvested(harvested, done_ids)
-                payload = {**payload, "jobs": all_jobs, "harvested_batches": harvested}
-                _write_data_file(payload)
-                if applied:
-                    progress(f"scoring_done:{applied}/{applied}")
-
-        if not active_batches:
-            return False
-
-        source = _apply_filter(all_jobs)
-        total = sum(1 for job in source if job.get("score") is None)
-
-        if not total:
-            return False
-
-        progress(f"scoring_start:{total}")
-
-        batch_objs = {b.id: b for b in active_batches}
-        still_active = set(batch_objs)
-        retrieve_failures: dict[str, int] = {}
-        started_at = time.monotonic()
-
-        while still_active:
-            for bid in list(still_active):
-                try:
-                    b = client.batches.retrieve(bid)
-                except Exception:
-                    # Give up on a batch we can no longer see rather than
-                    # polling it forever.
-                    retrieve_failures[bid] = retrieve_failures.get(bid, 0) + 1
-                    if retrieve_failures[bid] >= 30:
-                        still_active.discard(bid)
-                    continue
-                retrieve_failures[bid] = 0
-                batch_objs[bid] = b
-                if b.status in _TERMINAL:
-                    still_active.discard(bid)
-            total_completed = sum(b.request_counts.completed for b in batch_objs.values())
-            elapsed = int(time.monotonic() - started_at)
-            progress(f"scoring:{total_completed}:{total}:{elapsed}")
-            if still_active:
-                time.sleep(10)
-
-        all_scores: dict[str, float | None] = {}
-        done_ids = []
-        for b in batch_objs.values():
-            if b.status != "completed":
-                progress(f"scoring_skip:batch ended with status {b.status}")
-            output_id = getattr(b, "output_file_id", None)
-            if output_id:
-                try:
-                    all_scores.update(_parse_batch_scores(client.files.content(output_id).text))
-                    done_ids.append(b.id)
-                except Exception:
-                    continue
-
-        _apply_scores(all_jobs, all_scores)
-
-        try:
-            with _DATA_FILE_LOCK:
-                with DATA_FILE.open() as f:
-                    existing = json.load(f)
-        except Exception:
-            existing = {}
-        _write_data_file({
-            "updated": existing.get("updated", ""),
-            "jobs": all_jobs,
-            "harvested_batches": _merge_harvested(
-                existing.get("harvested_batches", harvested), done_ids
-            ),
-        })
-
-        n_scored = sum(1 for s in all_scores.values() if s is not None)
-        progress(f"scoring_done:{n_scored}/{total}")
-        return True
-
-    except Exception as e:
-        progress(f"scoring_skip:scoring failed during resume ({e})")
-        return False
 
 
 # ── Filter helpers ────────────────────────────────────────────────────────────
@@ -745,6 +524,8 @@ def _apply_filter(all_jobs: list) -> list:
         return all_jobs
     try:
         df = pd.DataFrame(all_jobs)
+        if df.empty:
+            return all_jobs
         filtered_df = df.query(pandas_query)
         return [all_jobs[i] for i in filtered_df.index]
     except Exception as e:
@@ -778,7 +559,7 @@ def _translate_filter(natural_language: str, prev_query: str = "", error: str = 
             {"role": "user", "content": f"That query failed with: {error}\nProvide a corrected query."},
         ]
     resp = client.chat.completions.create(
-        model="gpt-5.6-luna",
+        model="gpt-6-luna",
         messages=messages,
         max_completion_tokens=200,
     )
@@ -841,6 +622,8 @@ def data():
             payload = json.load(f)
         jobs = payload.get("jobs", [])
         df = pd.DataFrame(jobs)
+        if df.empty:
+            return send_from_directory(app.static_folder, "data.json")
         filtered_df = df.query(pandas_query)
         filtered_jobs = [jobs[i] for i in filtered_df.index]
         return jsonify({**payload, "jobs": filtered_jobs})
@@ -966,52 +749,6 @@ def filter_json():
     return jsonify({"status": "ok", "pandas_query": pandas_query})
 
 
-@app.route("/api/scoring-status")
-def api_scoring_status():
-    api_key = os.environ.get("OPENAI_API_KEY")
-    if not api_key:
-        return jsonify({"pending": False})
-    try:
-        import openai
-        client = openai.OpenAI(api_key=api_key, max_retries=0)
-        _ACTIVE = {"validating", "in_progress", "finalizing"}
-        # First page only — iterating the listing auto-paginates the full history
-        active = [b for b in _our_batches(client.batches.list(limit=20).data) if b.status in _ACTIVE]
-        return jsonify({"pending": bool(active), "count": len(active)})
-    except Exception:
-        return jsonify({"pending": False})
-
-
-def _resume_scoring_lines():
-    q: queue.Queue = queue.Queue()
-
-    def progress(msg: str) -> None:
-        q.put(msg)
-
-    def run() -> None:
-        try:
-            _resume_scoring(progress)
-        finally:
-            q.put(None)
-
-    threading.Thread(target=run, daemon=True).start()
-
-    while True:
-        msg = q.get()
-        if msg is None:
-            break
-        yield msg
-
-
-@app.route("/resume-scoring", methods=["POST"])
-def resume_scoring_route():
-    def generate():
-        for line in _resume_scoring_lines():
-            yield f"data:{line}\n\n"
-
-    return Response(stream_with_context(generate()), mimetype="text/event-stream")
-
-
 @app.route("/api/config")
 def api_config():
     has_persona = _PERSONA_FILE.exists() and bool(_PERSONA_FILE.read_text().strip())
@@ -1047,10 +784,9 @@ def _scrape_lines():
 
     def run():
         try:
-            if not _resume_scoring(progress):
-                all_jobs = scrape(progress=progress)
-                jobs_to_score = _apply_filter(all_jobs)
-                score_new_jobs(all_jobs, progress=progress, jobs_to_score=jobs_to_score)
+            all_jobs = scrape(progress=progress)
+            jobs_to_score = _apply_filter(all_jobs)
+            score_new_jobs(all_jobs, progress=progress, jobs_to_score=jobs_to_score)
         finally:
             q.put(None)  # sentinel
 

@@ -27,7 +27,7 @@ Click **Refresh** in the UI or `POST /refresh` to trigger a live scrape. Progres
 
 ## Relevance scoring (optional)
 
-After each scrape, jobs can be automatically scored for relevance using OpenAI's `gpt-5.4-nano` model via the Batch API. Set your API key to enable it:
+After each scrape, jobs can be automatically scored for relevance using OpenAI's `gpt-6-luna` model via the Responses API (8 parallel requests). Set your API key to enable it:
 
 ```bash
 export OPENAI_API_KEY=sk-...
@@ -45,7 +45,7 @@ Open the settings panel (gear icon in the UI) to write or edit your persona. Sav
 
 ### Filter
 
-The filter lets you narrow the jobs shown in the UI using plain English — for example: *"P-3 to P-5 roles in Geneva or home-based"*. The description is translated to a pandas query by `gpt-5.4-nano` and cached; the filter is re-applied on every page load and during scoring so only matching jobs are scored. The filter can also be cleared from the settings panel.
+The filter lets you narrow the jobs shown in the UI using plain English — for example: *"P-3 to P-5 roles in Geneva or home-based"*. The description is translated to a pandas query by `gpt-6-luna` and cached; the filter is re-applied on every page load and during scoring so only matching jobs are scored. The filter can also be cleared from the settings panel.
 
 ## Add a scraper
 

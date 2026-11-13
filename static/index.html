@@ -772,25 +772,6 @@ function handleScoringStream(reader, onDone) {
   read();
 }
 
-// Poll /api/scoring-status; if a batch is still in flight, reattach to it.
-function autoResumeScoring() {
-  fetch('/api/scoring-status')
-    .then(r => r.json())
-    .then(function(status) {
-      if (!status.pending) return;
-      const el = document.getElementById('updated-at');
-      if (el.classList.contains('refreshing')) return;
-      el.classList.add('refreshing');
-      el.textContent = 'scoring in progress…';
-      fetch('/resume-scoring', { method: 'POST' })
-        .then(r => handleScoringStream(r.body.getReader(), function() {
-          el.classList.remove('refreshing');
-        }))
-        .catch(function() { el.classList.remove('refreshing'); renderUpdatedAt(); });
-    })
-    .catch(function() {});
-}
-
 function reloadJobs() {
   fetch('/data.json')
     .then(r => r.json())
@@ -1444,8 +1425,6 @@ function init() {
       applySelection();
     });
 
-    // Auto-resume batch scoring if a batch is still in flight from a prior refresh
-    autoResumeScoring();
   });
 
   // Refresh
@@ -1521,11 +1500,9 @@ function init() {
             lines.forEach(processLine);
             read();
           }).catch(() => {
-            // Stream dropped (network blip, sleep). Unlock the UI and, if a
-            // batch is still running server-side, reattach to it.
+            // Stream dropped (network blip, sleep). Unlock the UI.
             el.classList.remove('refreshing');
             reloadJobs();
-            autoResumeScoring();
           });
         }
         read();
